@@ -117,6 +117,8 @@ class YTDownloader:
             'extract_flat': False,
             'no_color': True,
             'logtostderr': False,
+            'no_warnings': False,  # Enable warnings to see what's happening
+            'ignoreerrors': False,
         })
 
         loop = asyncio.get_event_loop()
@@ -126,7 +128,23 @@ class YTDownloader:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     return ydl.extract_info(url, download=False)
             except Exception as e:
-                print(f"Error extracting info: {str(e)}")
+                error_msg = str(e)
+                print(f"Error extracting info: {error_msg}")
+
+                # Try with more permissive options if format error
+                if "Requested format is not available" in error_msg:
+                    print("Retrying with more permissive format options...")
+                    fallback_opts = ydl_opts.copy()
+                    fallback_opts.update({
+                        'format': 'best',
+                        'no_warnings': True,
+                    })
+                    try:
+                        with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
+                            return ydl_fallback.extract_info(url, download=False)
+                    except Exception as e2:
+                        print(f"Fallback also failed: {str(e2)}")
+                        raise e2
                 raise
 
         info = await loop.run_in_executor(self.executor, extract_info)
@@ -188,10 +206,10 @@ class YTDownloader:
             'progress': {'percent': 0}
         }
 
-        # Set up download options - use config's default format
+        # Set up download options - use config's default format with fallbacks
         default_format = self.config.get_wecom_config().get(
             "default_format_id",
-            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
         )
         format_str = format_id or default_format
         output_template = os.path.join(self.download_dir, '%(title)s.%(ext)s')
@@ -262,8 +280,32 @@ class YTDownloader:
                     self.active_downloads[task_id]['filepath'] = os.path.abspath(filename)
                     return task_id
             except Exception as e:
+                error_msg = str(e)
+                print(f"Download error: {error_msg}")
+
+                # Try fallback format if format error
+                if "Requested format is not available" in error_msg:
+                    print(f"Retrying download with fallback format for task {task_id}...")
+                    fallback_opts = ydl_opts.copy()
+                    fallback_opts['format'] = 'best'
+
+                    try:
+                        with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
+                            info = ydl_fallback.extract_info(url, download=True)
+                            filename = ydl_fallback.prepare_filename(info)
+
+                            self.active_downloads[task_id]['status'] = 'completed'
+                            self.active_downloads[task_id]['filename'] = os.path.basename(filename)
+                            self.active_downloads[task_id]['filepath'] = os.path.abspath(filename)
+                            return task_id
+                    except Exception as e2:
+                        print(f"Fallback download also failed: {str(e2)}")
+                        self.active_downloads[task_id]['status'] = 'error'
+                        self.active_downloads[task_id]['error'] = str(e2)
+                        raise e2
+
                 self.active_downloads[task_id]['status'] = 'error'
-                self.active_downloads[task_id]['error'] = str(e)
+                self.active_downloads[task_id]['error'] = error_msg
                 raise e
 
         # Start download in background

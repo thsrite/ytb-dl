@@ -36,7 +36,7 @@ class Config:
                 "token": "",
                 "encoding_aes_key": "",
                 "public_base_url": "",
-                "default_format_id": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                "default_format_id": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
                 "proxy_domain": ""
             }
         }

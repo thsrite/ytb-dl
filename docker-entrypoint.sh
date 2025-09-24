@@ -11,5 +11,11 @@ chmod 755 /app/downloads /app/config
 # This ensures consistency between the entrypoint script and Python default config
 echo "Directories prepared. Config files will be created by the application if needed."
 
+# Set timezone to China Standard Time
+export TZ=Asia/Shanghai
+
+# Ensure yt-dlp can access the network properly
+echo "Container initialized successfully. Starting application..."
+
 # Execute the command
 exec "$@"

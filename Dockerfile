@@ -1,14 +1,18 @@
 # Use Python 3.11 Alpine for minimal size
 FROM python:3.11-alpine
 
-# Install system dependencies including ffmpeg
+# Install system dependencies including ffmpeg and networking tools
 RUN apk add --no-cache \
     ffmpeg \
     gcc \
     musl-dev \
     libffi-dev \
     openssl-dev \
-    && rm -rf /var/cache/apk/*
+    ca-certificates \
+    wget \
+    curl \
+    && rm -rf /var/cache/apk/* \
+    && update-ca-certificates
 
 # Set working directory
 WORKDIR /app
