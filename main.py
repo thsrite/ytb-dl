@@ -450,7 +450,6 @@ async def upload_cookies(data: dict):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 # Serve frontend static files
 if os.path.exists("../frontend"):
     app.mount("/static", StaticFiles(directory="../frontend"), name="static")
