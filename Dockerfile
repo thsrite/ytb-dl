@@ -1,39 +1,35 @@
-# Use Python 3.12 Alpine for minimal size
+# Multi-stage build for smaller final image
+FROM python:3.12-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache gcc musl-dev libffi-dev openssl-dev
+
+# Install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# Final stage
 FROM python:3.12-alpine
 
-# Install system dependencies including ffmpeg and networking tools
-RUN apk add --no-cache \
-    ffmpeg \
-    gcc \
-    musl-dev \
-    libffi-dev \
-    openssl-dev \
-    ca-certificates \
-    wget \
-    curl \
-    chromium \
-    xvfb \
+# Install only runtime dependencies
+RUN apk add --no-cache ffmpeg ca-certificates wget \
     && rm -rf /var/cache/apk/* \
     && update-ca-certificates
 
-# Set working directory
+# Copy Python packages from builder stage
+COPY --from=builder /root/.local /root/.local
+
+# Make sure scripts in .local are usable
+ENV PATH=/root/.local/bin:$PATH
+
+# Set working directory and copy app
 WORKDIR /app
-
-# Copy requirements first for better caching
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application code
 COPY . .
 
-# Copy and make entrypoint script executable
-COPY docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-
-# Create necessary directories
-RUN mkdir -p downloads config
+# Setup entrypoint and create directories in single layer
+RUN chmod +x docker-entrypoint.sh \
+    && mkdir -p downloads config \
+    && mv docker-entrypoint.sh /usr/local/bin/
 
 # Set environment variables
 ENV PYTHONPATH=/app

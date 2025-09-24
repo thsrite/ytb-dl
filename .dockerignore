@@ -1,6 +1,7 @@
 # Git
 .git
 .gitignore
+.github
 
 # Python
 __pycache__/
@@ -13,6 +14,10 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
 
 # IDE
 .vscode/
@@ -24,24 +29,25 @@ venv.bak/
 .DS_Store
 Thumbs.db
 
-# Logs
+# Logs and temp files
 *.log
 logs/
+*.tmp
+*.temp
 
-# Downloads (will be mounted as volume)
+# Downloads and config (will be created in container)
 downloads/*
-!downloads/.gitkeep
+config/*.json
+config/*.txt
 
-# Development
-.pytest_cache/
-.coverage
-htmlcov/
-
-# Documentation
+# Development and testing
+tests/
+*_test.py
+test_*
 *.md
 !README.md
 
-# Docker
-Dockerfile
-docker-compose.yml
+# Docker and CI
+Dockerfile*
+docker-compose*.yml
 .dockerignore
