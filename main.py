@@ -27,8 +27,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize downloader
-downloader = YTDownloader()
+# Initialize downloader with Docker-compatible path
+download_dir = "/app/downloads" if os.path.exists("/app") else "downloads"
+downloader = YTDownloader(download_dir)
 
 # Initialize config
 config = Config()
@@ -425,7 +426,8 @@ async def wecom_callback(
 async def get_cookies():
     """获取cookies内容"""
     try:
-        cookies_file = os.path.join("config", "cookies.txt")
+        # Use Docker-compatible path
+        cookies_file = "/app/config/cookies.txt" if os.path.exists("/app") else os.path.join("config", "cookies.txt")
         if os.path.exists(cookies_file):
             with open(cookies_file, 'r', encoding='utf-8') as f:
                 content = f.read()
@@ -444,9 +446,16 @@ async def upload_cookies(data: dict):
         if not content:
             raise HTTPException(status_code=400, detail="No cookies content provided")
 
-        cookies_file = os.path.join("config", "cookies.txt")
+        # Use Docker-compatible path
+        if os.path.exists("/app"):
+            cookies_file = "/app/config/cookies.txt"
+            config_dir = "/app/config"
+        else:
+            cookies_file = os.path.join("config", "cookies.txt")
+            config_dir = "config"
+
         # 确保config目录存在
-        os.makedirs("config", exist_ok=True)
+        os.makedirs(config_dir, exist_ok=True)
 
         with open(cookies_file, 'w', encoding='utf-8') as f:
             f.write(content)

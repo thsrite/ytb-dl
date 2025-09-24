@@ -6,9 +6,13 @@ from typing import Dict, Any, Optional
 class Config:
     def __init__(self, config_file: str = None):
         if config_file is None:
-            # Default path relative to the project root
-            base_dir = os.path.dirname(os.path.dirname(__file__))  # Go up two levels from ytb/config.py
-            config_file = os.path.join(base_dir, "config", "config.json")
+            # Check if running in Docker container
+            if os.path.exists("/app"):
+                config_file = "/app/config/config.json"
+            else:
+                # Default path relative to the project root
+                base_dir = os.path.dirname(os.path.dirname(__file__))  # Go up two levels from ytb/config.py
+                config_file = os.path.join(base_dir, "config", "config.json")
         self.config_file = config_file
         self.default_config = {
             "cookies_file": None,
@@ -142,8 +146,14 @@ class Config:
             return config_cookies
 
         # 然后检查默认的config/cookies.txt
-        base_dir = os.path.dirname(os.path.dirname(__file__))
-        default_cookies = os.path.join(base_dir, "config", "cookies.txt")
+        if os.path.exists("/app"):
+            # Docker environment
+            default_cookies = "/app/config/cookies.txt"
+        else:
+            # Local development
+            base_dir = os.path.dirname(os.path.dirname(__file__))
+            default_cookies = os.path.join(base_dir, "config", "cookies.txt")
+
         if os.path.exists(default_cookies):
             return default_cookies
 

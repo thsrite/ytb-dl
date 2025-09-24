@@ -49,7 +49,7 @@ jobs:
         docker-compose up -d
 
         # Or using docker directly
-        docker run -p 8000:8000 -v ./downloads:/app/downloads -v ./config:/app/config thsrite/ytb-dl:${GITHUB_REF#refs/tags/}
+        docker run -p 9832:9832 -v ./downloads:/app/downloads -v ./config:/app/config thsrite/ytb-dl:${GITHUB_REF#refs/tags/}
         \`\`\`
         EOF
 

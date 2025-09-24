@@ -10,9 +10,13 @@ logger = logging.getLogger(__name__)
 class HistoryManager:
     def __init__(self, history_file: Optional[str] = None):
         if history_file is None:
-            # Default path relative to the project root
-            base_dir = os.path.dirname(os.path.dirname(__file__))  # Go up two levels from ytb/history_manager.py
-            history_file = os.path.join(base_dir, "config", "download_history.json")
+            # Check if running in Docker container
+            if os.path.exists("/app"):
+                history_file = "/app/config/download_history.json"
+            else:
+                # Default path relative to the project root
+                base_dir = os.path.dirname(os.path.dirname(__file__))  # Go up two levels from ytb/history_manager.py
+                history_file = os.path.join(base_dir, "config", "download_history.json")
         self.history_file = history_file
         self.history: List[Dict[str, Any]] = []
         self.load_history()
