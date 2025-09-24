@@ -6,7 +6,8 @@ RUN apk add --no-cache gcc musl-dev libffi-dev openssl-dev
 
 # Install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir --user -r requirements.txt
 
 # Final stage
 FROM python:3.12-alpine
