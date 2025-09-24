@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 
-一个功能强大的 YouTube 视频下载器，集成企业微信应用交互下载、通知、多格式支持、实时进度监控和现代化 Web 界面。基于 FastAPI 和 yt-dlp 构建，支持 Docker 部署。
+一个功能强大的 YouTube 视频下载器，集成企业微信应用交互下载、通知、多格式支持、实时进度监控和现代化 Web 界面。基于 FastAPI 和 yt-dlp 构建，支持 Docker 部署和源码部署。
 
 ![Screenshot](https://img.shields.io/badge/UI-Modern%20Glassmorphism-brightgreen)
 
