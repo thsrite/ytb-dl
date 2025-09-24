@@ -1,5 +1,8 @@
-// API Base URL
-const API_BASE_URL = 'http://localhost:9832';
+// API Base URL - dynamically determined based on current page location
+const API_BASE_URL = window.location.origin || `${window.location.protocol}//${window.location.host}`;
+
+// Log the API base URL for debugging
+console.log('API Base URL:', API_BASE_URL);
 
 // Global variables
 let currentTaskId = null;
