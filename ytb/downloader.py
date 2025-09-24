@@ -230,7 +230,6 @@ class YTDownloader:
             'format': format_str,
             'outtmpl': output_template,
             'progress_hooks': [self._progress_hook(task_id)],
-            'merge_output_format': 'mp4',
         })
 
         # Build and log the equivalent yt-dlp command
@@ -245,8 +244,8 @@ class YTDownloader:
         # Add output template
         command_parts.append(f'-o "{output_template}"')
 
-        # Add merge format
-        command_parts.append('--merge-output-format mp4')
+        # Add recode video format
+        command_parts.append('--recode-video mp4')
 
         # Add proxy if configured
         if ydl_opts.get('proxy'):

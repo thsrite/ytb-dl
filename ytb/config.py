@@ -92,6 +92,7 @@ class Config:
             'quiet': True,
             'no_warnings': True,
             'user_agent': self.config.get('user_agent'),
+            'recode_video': 'mp4',  # Force convert all videos to MP4
             **self.config.get('extra_params', {})
         }
 
