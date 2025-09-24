@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YouTube 视频下载器</title>
+    <link rel="stylesheet" href="./css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1 class="title">🎬 YouTube 视频下载器</h1>
+            <p class="subtitle">轻松下载 YouTube 视频，支持最佳质量和音视频合并</p>
+        </header>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab-button active" data-tab="download">视频下载</button>
+            <button class="tab-button" data-tab="history">下载历史</button>
+            <button class="tab-button" data-tab="settings">高级设置</button>
+        </div>
+
+        <!-- Download Tab Content -->
+        <div class="tab-content" id="download-tab">
+            <!-- URL Input Section -->
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">输入 YouTube 视频链接</h2>
+                </div>
+                <div class="card-content">
+                    <div class="input-group">
+                        <input
+                            type="url"
+                            id="video-url"
+                            class="input"
+                            placeholder="粘贴 YouTube 视频链接..."
+                        >
+                        <button id="fetch-btn" class="btn btn-primary">
+                            获取信息
+                        </button>
+                    </div>
+                    <div id="fetch-loading" class="loading-container hidden">
+                        <div class="spinner"></div>
+                        <p>正在获取视频信息...</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Video Info Section -->
+            <div id="video-info" class="card hidden">
+                <div class="card-header">
+                    <h2 class="card-title">视频信息</h2>
+                </div>
+                <div class="card-content">
+                    <div class="video-info-grid">
+                        <div class="video-thumbnail-container">
+                            <img id="video-thumbnail" src="" alt="Video thumbnail" class="video-thumbnail">
+                        </div>
+                        <div class="video-details">
+                            <h3 id="video-title" class="video-title"></h3>
+                            <p id="video-description" class="video-description"></p>
+
+                            <div class="video-meta">
+                                <div class="meta-item">
+                                    <span class="meta-icon">👤</span>
+                                    <span id="video-author"></span>
+                                </div>
+                                <div class="meta-item">
+                                    <span class="meta-icon">⏱️</span>
+                                    <span id="video-duration"></span>
+                                </div>
+                                <div class="meta-item">
+                                    <span class="meta-icon">👁️</span>
+                                    <span id="video-views"></span>
+                                </div>
+                                <div class="meta-item">
+                                    <span class="meta-icon">👍</span>
+                                    <span id="video-likes"></span>
+                                </div>
+                            </div>
+
+                            <div class="separator"></div>
+
+                            <div class="format-section">
+                                <label for="format-select" class="format-label">选择下载质量:</label>
+                                <select id="format-select" class="format-select">
+                                    <option value="best">最佳质量 (自动)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Download Control Section -->
+            <div id="download-control" class="card hidden">
+                <div class="card-header">
+                    <h2 class="card-title">下载控制</h2>
+                </div>
+                <div class="card-content">
+                    <button id="download-btn" class="btn btn-success btn-large">
+                        ⬇️ 开始下载
+                    </button>
+
+                    <div id="download-progress" class="hidden">
+                        <div class="progress-info">
+                            <span id="progress-status">准备下载...</span>
+                            <span id="progress-percent">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div id="progress-fill" class="progress-fill"></div>
+                        </div>
+                        <div class="download-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">速度:</span>
+                                <span id="download-speed" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">已下载:</span>
+                                <span id="download-size" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">总大小:</span>
+                                <span id="total-size" class="stat-value">--</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">剩余时间:</span>
+                                <span id="download-eta" class="stat-value">--</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="download-complete" class="hidden">
+                        <div class="success-message">
+                            ✅ 下载完成！
+                            <p id="download-filename"></p>
+                        </div>
+                        <div class="download-actions">
+                            <button id="save-file-btn" class="btn btn-primary">
+                                💾 保存文件
+                            </button>
+                            <button id="new-download-btn" class="btn btn-outline">
+                                🔄 下载新视频
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- History Tab Content -->
+        <div class="tab-content hidden" id="history-tab">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">下载历史</h2>
+                </div>
+                <div class="card-content">
+                    <div id="history-list" class="history-list">
+                        <!-- History items will be dynamically added here -->
+                    </div>
+                    <div id="no-history" class="no-history">
+                        <p>暂无下载历史</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Tab Content -->
+        <div class="tab-content hidden" id="settings-tab">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">高级设置</h2>
+                </div>
+                <div class="card-content">
+                    <!-- Cookies设置 -->
+                    <div class="settings-section">
+                        <h3 class="settings-subtitle">YouTube Cookies</h3>
+                        <p class="settings-description">上传cookies.txt文件以绕过年龄限制和地区限制</p>
+                        <textarea id="cookies-input" class="textarea" placeholder="粘贴cookies.txt内容..."></textarea>
+                        <button id="save-cookies-btn" class="btn btn-primary">保存Cookies</button>
+                    </div>
+
+                    <div class="separator"></div>
+
+                    <!-- 代理和User Agent设置 -->
+                    <div class="settings-section">
+                        <h3 class="settings-subtitle">网络设置</h3>
+                        <div class="settings-row">
+                            <div class="settings-col">
+                                <label class="input-label">代理设置</label>
+                                <input type="text" id="proxy-input" class="input" placeholder="例如: socks5://127.0.0.1:1080">
+                            </div>
+                            <div class="settings-col">
+                                <label class="input-label">User Agent</label>
+                                <input type="text" id="user_agent" class="input"
+                                    value="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="separator"></div>
+
+                    <!-- yt-dlp参数 -->
+                    <div class="settings-section">
+                        <h3 class="settings-subtitle">yt-dlp 高级参数</h3>
+                        <div class="settings-grid">
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="nocheckcertificate" checked>
+                                    跳过SSL证书验证
+                                </label>
+                            </div>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="geo_bypass" checked>
+                                    绕过地理限制
+                                </label>
+                            </div>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="skip_unavailable_fragments" checked>
+                                    跳过不可用片段
+                                </label>
+                            </div>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    睡眠间隔 (秒):
+                                    <input type="number" id="sleep_interval" class="input-small" value="1" min="0" max="10">
+                                </label>
+                            </div>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    最大重试次数:
+                                    <input type="number" id="retries" class="input-small" value="3" min="1" max="10">
+                                </label>
+                            </div>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    片段重试次数:
+                                    <input type="number" id="fragment_retries" class="input-small" value="3" min="1" max="10">
+                                </label>
+                            </div>
+                        </div>
+
+                        <!-- 自定义参数输入 -->
+                        <div class="custom-params-section">
+                            <label class="input-label">自定义参数 (每行一个参数)</label>
+                            <textarea id="custom-params" class="textarea" rows="3"
+                                placeholder="例如:
+--concurrent-fragments 5
+--buffer-size 2048
+--http-chunk-size 10485760"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="settings-actions">
+                        <button id="save-settings-btn" class="btn btn-success">保存所有设置</button>
+                        <button id="reset-settings-btn" class="btn btn-outline">重置为默认</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="./js/app.js"></script>
+</body>
+</html>
