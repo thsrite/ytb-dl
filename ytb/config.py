@@ -85,12 +85,33 @@ class Config:
 
     def get_ydl_opts(self, additional_opts: Optional[Dict] = None) -> Dict[str, Any]:
         """获取yt-dlp选项"""
+        # Check if running in Docker for environment-specific settings
+        is_docker = os.path.exists("/app")
+
         opts = {
             'quiet': True,
             'no_warnings': True,
             'user_agent': self.config.get('user_agent'),
             **self.config.get('extra_params', {})
         }
+
+        # Docker-specific enhancements
+        if is_docker:
+            opts.update({
+                'force_ipv4': True,  # Force IPv4 in Docker environments
+                'prefer_insecure': False,  # Keep secure connections
+                'no_check_certificate': True,  # But be flexible with certificates
+                'geo_bypass': True,
+                'geo_bypass_country': 'US',  # Default to US for better availability
+                'http_chunk_size': 10485760,  # 10MB chunks for better Docker network handling
+                'extractor_retries': 3,  # More aggressive retrying
+                'fragment_retries': 5,  # More fragment retries in Docker
+                'retry_sleep_functions': {
+                    'http': lambda n: min(4, 1.5 ** n),
+                    'fragment': lambda n: min(8, 2 ** n),
+                    'extractor': lambda n: min(16, 3 ** n)
+                }
+            })
 
         # 添加cookies文件
         cookies_file = self._get_cookies_file()

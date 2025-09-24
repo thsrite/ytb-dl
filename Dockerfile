@@ -1,5 +1,5 @@
-# Use Python 3.11 Alpine for minimal size
-FROM python:3.11-alpine
+# Use Python 3.12 Alpine for minimal size
+FROM python:3.12-alpine
 
 # Install system dependencies including ffmpeg and networking tools
 RUN apk add --no-cache \
@@ -11,6 +11,8 @@ RUN apk add --no-cache \
     ca-certificates \
     wget \
     curl \
+    chromium \
+    xvfb \
     && rm -rf /var/cache/apk/* \
     && update-ca-certificates
 

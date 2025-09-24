@@ -94,6 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadHistory();
     loadSettings();
     initWebSocket();
+    loadVersionInfo();
 
     // Ensure input field is not disabled
     if (elements.videoUrl) {
@@ -1369,4 +1370,26 @@ async function resetSettings() {
 
     // Save default settings
     await saveSettings();
+}
+
+// Load version information
+async function loadVersionInfo() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/version`);
+        if (response.ok) {
+            const versionData = await response.json();
+            const versionDisplay = document.getElementById('version-display');
+            if (versionDisplay) {
+                versionDisplay.textContent = `v${versionData.app_version} | yt-dlp ${versionData.yt_dlp_version} | Python ${versionData.python_version}`;
+            }
+        } else {
+            console.warn('Failed to load version info');
+        }
+    } catch (error) {
+        console.error('Error loading version info:', error);
+        const versionDisplay = document.getElementById('version-display');
+        if (versionDisplay) {
+            versionDisplay.textContent = 'Version info unavailable';
+        }
+    }
 }

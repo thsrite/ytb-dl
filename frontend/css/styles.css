@@ -1316,3 +1316,33 @@ body {
         gap: 4px;
     }
 }
+
+/* Version Footer */
+.version-footer {
+    margin-top: 40px;
+    padding: 20px;
+    text-align: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(10px);
+}
+
+.version-info {
+    font-size: 0.85rem;
+    color: rgba(255, 255, 255, 0.6);
+}
+
+.version-info span {
+    margin: 0 8px;
+}
+
+@media (max-width: 768px) {
+    .version-footer {
+        margin-top: 20px;
+        padding: 15px;
+    }
+
+    .version-info {
+        font-size: 0.8rem;
+    }
+}

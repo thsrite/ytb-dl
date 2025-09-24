@@ -207,10 +207,22 @@ class YTDownloader:
         }
 
         # Set up download options - use config's default format with fallbacks
-        default_format = self.config.get_wecom_config().get(
-            "default_format_id",
-            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
-        )
+        # More aggressive fallback for Docker environments
+        is_docker = os.path.exists("/app")
+
+        if is_docker:
+            # Docker environment - use more permissive format chain
+            default_format = self.config.get_wecom_config().get(
+                "default_format_id",
+                "best[ext=mp4]/bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
+            )
+        else:
+            # Local environment - can be more specific
+            default_format = self.config.get_wecom_config().get(
+                "default_format_id",
+                "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best"
+            )
+
         format_str = format_id or default_format
         output_template = os.path.join(self.download_dir, '%(title)s.%(ext)s')
 
@@ -283,26 +295,49 @@ class YTDownloader:
                 error_msg = str(e)
                 print(f"Download error: {error_msg}")
 
-                # Try fallback format if format error
+                # Try multiple fallback strategies if format error
                 if "Requested format is not available" in error_msg:
-                    print(f"Retrying download with fallback format for task {task_id}...")
-                    fallback_opts = ydl_opts.copy()
-                    fallback_opts['format'] = 'best'
+                    print(f"Retrying download with fallback formats for task {task_id}...")
 
-                    try:
-                        with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
-                            info = ydl_fallback.extract_info(url, download=True)
-                            filename = ydl_fallback.prepare_filename(info)
+                    # Define progressive fallback formats
+                    fallback_formats = [
+                        'best[ext=mp4]',  # First try: best quality MP4
+                        'worst[ext=mp4]',  # Second try: any MP4
+                        'best',  # Third try: any best format
+                        'worst',  # Last resort: any format
+                    ]
 
-                            self.active_downloads[task_id]['status'] = 'completed'
-                            self.active_downloads[task_id]['filename'] = os.path.basename(filename)
-                            self.active_downloads[task_id]['filepath'] = os.path.abspath(filename)
-                            return task_id
-                    except Exception as e2:
-                        print(f"Fallback download also failed: {str(e2)}")
-                        self.active_downloads[task_id]['status'] = 'error'
-                        self.active_downloads[task_id]['error'] = str(e2)
-                        raise e2
+                    for i, fallback_format in enumerate(fallback_formats, 1):
+                        try:
+                            print(f"Fallback attempt {i}: Using format '{fallback_format}'")
+                            fallback_opts = ydl_opts.copy()
+                            fallback_opts['format'] = fallback_format
+
+                            # For Docker, also add more aggressive options
+                            if is_docker:
+                                fallback_opts.update({
+                                    'ignoreerrors': True,
+                                    'no_warnings': True,
+                                    'extract_flat': False,
+                                })
+
+                            with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
+                                info = ydl_fallback.extract_info(url, download=True)
+                                filename = ydl_fallback.prepare_filename(info)
+
+                                self.active_downloads[task_id]['status'] = 'completed'
+                                self.active_downloads[task_id]['filename'] = os.path.basename(filename)
+                                self.active_downloads[task_id]['filepath'] = os.path.abspath(filename)
+                                print(f"Fallback successful with format '{fallback_format}'")
+                                return task_id
+                        except Exception as e2:
+                            print(f"Fallback {i} with format '{fallback_format}' failed: {str(e2)}")
+                            if i == len(fallback_formats):  # Last attempt failed
+                                print(f"All fallback attempts failed for task {task_id}")
+                                self.active_downloads[task_id]['status'] = 'error'
+                                self.active_downloads[task_id]['error'] = f"All fallback formats failed. Last error: {str(e2)}"
+                                raise e2
+                            continue  # Try next fallback format
 
                 self.active_downloads[task_id]['status'] = 'error'
                 self.active_downloads[task_id]['error'] = error_msg

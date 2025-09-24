@@ -348,6 +348,18 @@ async def get_config():
     return config.config
 
 
+@app.get("/api/version")
+async def get_version():
+    """获取版本信息"""
+    import yt_dlp
+    import sys
+    return {
+        "app_version": "1.0.0",
+        "yt_dlp_version": yt_dlp.version.__version__,
+        "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    }
+
+
 @app.post("/api/config")
 async def update_config(updates: dict):
     """更新配置"""
