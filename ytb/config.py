@@ -44,16 +44,23 @@ class Config:
 
     def load_config(self) -> Dict[str, Any]:
         """加载配置文件"""
+        print(f"Loading config from: {self.config_file}")
+
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     loaded = json.load(f)
+                    print(f"Successfully loaded existing config with {len(loaded)} keys")
                     # 合并默认配置和加载的配置
                     return self._deep_merge(self.default_config, loaded)
             except Exception as e:
                 print(f"Error loading config: {e}")
+                print("Falling back to default config")
         else:
+            # 文件不存在，创建默认配置文件
+            print(f"Config file does not exist, creating default at: {self.config_file}")
             self._ensure_dir()
+            self._create_default_config()
         return self.default_config.copy()
 
     def save_config(self) -> bool:
@@ -163,3 +170,12 @@ class Config:
         directory = os.path.dirname(self.config_file)
         if directory:
             os.makedirs(directory, exist_ok=True)
+
+    def _create_default_config(self) -> None:
+        """创建默认配置文件"""
+        try:
+            with open(self.config_file, 'w', encoding='utf-8') as f:
+                json.dump(self.default_config, f, indent=4, ensure_ascii=False)
+            print(f"Created default config file: {self.config_file}")
+        except Exception as e:
+            print(f"Error creating default config: {e}")
