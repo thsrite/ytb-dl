@@ -43,6 +43,7 @@ const elements = {
     downloadEta: document.getElementById('download-eta'),
     downloadComplete: document.getElementById('download-complete'),
     downloadFilename: document.getElementById('download-filename'),
+    playVideoBtn: document.getElementById('play-video-btn'),
     saveFileBtn: document.getElementById('save-file-btn'),
     newDownloadBtn: document.getElementById('new-download-btn'),
 
@@ -51,6 +52,7 @@ const elements = {
     noHistory: document.getElementById('no-history'),
 
     // Settings
+    cookiesStatus: document.getElementById('cookies-status'),
     cookiesInput: document.getElementById('cookies-input'),
     saveCookiesBtn: document.getElementById('save-cookies-btn'),
     proxyInput: document.getElementById('proxy-input'),
@@ -69,7 +71,17 @@ const elements = {
     fragmentRetries: document.getElementById('fragment_retries'),
 
     // Custom parameters
-    customParams: document.getElementById('custom-params')
+    customParams: document.getElementById('custom-params'),
+
+    // WeCom settings
+    wecomCorpId: document.getElementById('wecom-corp-id'),
+    wecomAgentId: document.getElementById('wecom-agent-id'),
+    wecomAppSecret: document.getElementById('wecom-app-secret'),
+    wecomToken: document.getElementById('wecom-token'),
+    wecomEncodingKey: document.getElementById('wecom-encoding-key'),
+    wecomPublicUrl: document.getElementById('wecom-public-url'),
+    wecomDefaultFormat: document.getElementById('wecom-default-format'),
+    wecomProxyDomain: document.getElementById('wecom-proxy-domain')
 };
 
 // Initialize
@@ -79,6 +91,17 @@ document.addEventListener('DOMContentLoaded', () => {
     loadHistory();
     loadSettings();
     initWebSocket();
+
+    // Ensure input field is not disabled
+    if (elements.videoUrl) {
+        elements.videoUrl.disabled = false;
+        elements.videoUrl.readOnly = false;
+        elements.videoUrl.style.pointerEvents = 'auto';
+        console.log('Video URL input field initialized:', elements.videoUrl);
+    }
+
+    // Start global progress monitoring for all downloading tasks
+    startProgressPolling();
 });
 
 // Tab Management
@@ -121,6 +144,7 @@ function switchTab(tabName) {
 function initEventListeners() {
     elements.fetchBtn.addEventListener('click', fetchVideoInfo);
     elements.downloadBtn.addEventListener('click', startDownload);
+    elements.playVideoBtn.addEventListener('click', playCurrentVideo);
     elements.saveFileBtn.addEventListener('click', saveFile);
     elements.newDownloadBtn.addEventListener('click', resetDownload);
 
@@ -177,7 +201,12 @@ async function fetchVideoInfo() {
 // Display Video Info
 function displayVideoInfo(videoData) {
     // Update video details
-    elements.videoThumbnail.src = videoData.thumbnail || '';
+    // 使用代理端点获取缩略图
+    if (videoData.thumbnail) {
+        elements.videoThumbnail.src = `${API_BASE_URL}/api/proxy-thumbnail?url=${encodeURIComponent(videoData.thumbnail)}`;
+    } else {
+        elements.videoThumbnail.src = '';
+    }
     elements.videoTitle.textContent = videoData.title || '未知标题';
     elements.videoDescription.textContent = videoData.description || '';
     elements.videoAuthor.textContent = videoData.uploader || '未知作者';
@@ -203,12 +232,19 @@ function updateFormatSelect(formats) {
     let bestQualityInfo = '';
 
     if (formats && formats.length > 0) {
-        // Find the largest video format
+        // Find the best video format, prioritizing MP4
         const videoFormats = formats.filter(f => f.vcodec && f.vcodec !== 'none');
         const audioFormats = formats.filter(f => f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none'));
 
         if (videoFormats.length > 0) {
-            const bestVideo = videoFormats.reduce((a, b) => {
+            // Separate MP4 and non-MP4 formats
+            const mp4VideoFormats = videoFormats.filter(f => f.ext === 'mp4');
+            const nonMp4VideoFormats = videoFormats.filter(f => f.ext !== 'mp4');
+
+            // Choose the best format, prioritizing MP4
+            const formatsToConsider = mp4VideoFormats.length > 0 ? mp4VideoFormats : nonMp4VideoFormats;
+
+            const bestVideo = formatsToConsider.reduce((a, b) => {
                 const aSize = a.filesize || 0;
                 const bSize = b.filesize || 0;
                 const aRes = parseInt(a.resolution.split('x')[1] || 0);
@@ -218,16 +254,26 @@ function updateFormatSelect(formats) {
                 return aSize > bSize ? a : b;
             });
 
-            // Find the best audio format
-            const bestAudio = audioFormats.length > 0 ? audioFormats.reduce((a, b) => {
-                const aSize = a.filesize || 0;
-                const bSize = b.filesize || 0;
-                const aBitrate = a.abr || 0;
-                const bBitrate = b.abr || 0;
-                // Prefer higher bitrate or larger size
-                if (aBitrate !== bBitrate) return aBitrate > bBitrate ? a : b;
-                return aSize > bSize ? a : b;
-            }) : null;
+            // Find the best audio format, prioritizing M4A
+            let bestAudio = null;
+            if (audioFormats.length > 0) {
+                // Separate M4A and other audio formats
+                const m4aAudio = audioFormats.filter(f => f.ext === 'm4a');
+                const nonM4aAudio = audioFormats.filter(f => f.ext !== 'm4a');
+
+                // Choose the best format, prioritizing M4A
+                const audioToConsider = m4aAudio.length > 0 ? m4aAudio : nonM4aAudio;
+
+                bestAudio = audioToConsider.reduce((a, b) => {
+                    const aSize = a.filesize || 0;
+                    const bSize = b.filesize || 0;
+                    const aBitrate = a.abr || 0;
+                    const bBitrate = b.abr || 0;
+                    // Prefer higher bitrate or larger size
+                    if (aBitrate !== bBitrate) return aBitrate > bBitrate ? a : b;
+                    return aSize > bSize ? a : b;
+                });
+            }
 
             // Calculate total size
             if (bestVideo.filesize) {
@@ -261,24 +307,47 @@ function updateFormatSelect(formats) {
             const optgroup = document.createElement('optgroup');
             optgroup.label = '视频格式';
 
-            // Sort video formats by file size (larger first)
-            videoFormats.sort((a, b) => {
-                const aSize = a.filesize || 0;
-                const bSize = b.filesize || 0;
-                // If both have sizes, sort by size
-                if (aSize && bSize) {
-                    return bSize - aSize;
-                }
-                // If only one has size, prioritize it
-                if (aSize && !bSize) return -1;
-                if (!aSize && bSize) return 1;
-                // If neither has size, sort by resolution
-                const aRes = parseInt(a.resolution.split('x')[1] || 0);
-                const bRes = parseInt(b.resolution.split('x')[1] || 0);
-                return bRes - aRes;
-            });
+            // Separate MP4 and WebM formats, then sort each group by quality
+            const mp4Formats = videoFormats.filter(f => f.ext === 'mp4');
+            const webmFormats = videoFormats.filter(f => f.ext === 'webm');
+            const otherFormats = videoFormats.filter(f => f.ext !== 'mp4' && f.ext !== 'webm');
 
-            videoFormats.forEach(format => {
+            // Function to sort formats by quality (larger size or higher resolution first)
+            const sortByQuality = (formats) => {
+                return formats.sort((a, b) => {
+                    const aSize = a.filesize || 0;
+                    const bSize = b.filesize || 0;
+                    // If both have sizes, sort by size
+                    if (aSize && bSize) {
+                        return bSize - aSize;
+                    }
+                    // If only one has size, prioritize it
+                    if (aSize && !bSize) return -1;
+                    if (!aSize && bSize) return 1;
+                    // If neither has size, sort by resolution
+                    const aRes = parseInt(a.resolution.split('x')[1] || 0);
+                    const bRes = parseInt(b.resolution.split('x')[1] || 0);
+                    return bRes - aRes;
+                });
+            };
+
+            // Sort each format group by quality
+            const sortedMp4 = sortByQuality([...mp4Formats]);
+            const sortedWebm = sortByQuality([...webmFormats]);
+            const sortedOthers = sortByQuality([...otherFormats]);
+
+            // Combine in desired order: MP4 first, then WebM, then others
+            const sortedVideoFormats = [...sortedMp4, ...sortedWebm, ...sortedOthers];
+
+            // Keep track of current format type for grouping
+            let currentFormatType = '';
+
+            sortedVideoFormats.forEach((format, index) => {
+                // Add format type separator in the description
+                const formatType = format.ext.toUpperCase();
+                let isNewGroup = formatType !== currentFormatType;
+                currentFormatType = formatType;
+
                 const option = document.createElement('option');
                 option.value = format.format_id;
 
@@ -297,8 +366,12 @@ function updateFormatSelect(formats) {
                     parts.push(format.format_note);
                 }
 
-                // Add file extension
-                parts.push(format.ext);
+                // Add format note (file extension with emphasis for MP4/WebM)
+                if (format.ext === 'mp4' || format.ext === 'webm') {
+                    parts.push(format.ext.toUpperCase());
+                } else {
+                    parts.push(format.ext);
+                }
 
                 // Build size/bitrate info
                 let sizeInfo = '';
@@ -337,22 +410,37 @@ function updateFormatSelect(formats) {
             const optgroup = document.createElement('optgroup');
             optgroup.label = '仅音频';
 
-            // Sort audio formats by file size (larger first)
-            audioFormats.sort((a, b) => {
-                const aSize = a.filesize || 0;
-                const bSize = b.filesize || 0;
-                // If both have sizes, sort by size
-                if (aSize && bSize) {
-                    return bSize - aSize;
-                }
-                // If only one has size, prioritize it
-                if (aSize && !bSize) return -1;
-                if (!aSize && bSize) return 1;
-                // If neither has size, sort by bitrate
-                return (b.abr || 0) - (a.abr || 0);
-            });
+            // Separate M4A and other audio formats, then sort each group by quality
+            const m4aFormats = audioFormats.filter(f => f.ext === 'm4a');
+            const webmAudioFormats = audioFormats.filter(f => f.ext === 'webm');
+            const otherAudioFormats = audioFormats.filter(f => f.ext !== 'm4a' && f.ext !== 'webm');
 
-            audioFormats.forEach(format => {
+            // Function to sort audio formats by quality (larger size or higher bitrate first)
+            const sortAudioByQuality = (formats) => {
+                return formats.sort((a, b) => {
+                    const aSize = a.filesize || 0;
+                    const bSize = b.filesize || 0;
+                    // If both have sizes, sort by size
+                    if (aSize && bSize) {
+                        return bSize - aSize;
+                    }
+                    // If only one has size, prioritize it
+                    if (aSize && !bSize) return -1;
+                    if (!aSize && bSize) return 1;
+                    // If neither has size, sort by bitrate
+                    return (b.abr || 0) - (a.abr || 0);
+                });
+            };
+
+            // Sort each audio format group by quality
+            const sortedM4a = sortAudioByQuality([...m4aFormats]);
+            const sortedWebmAudio = sortAudioByQuality([...webmAudioFormats]);
+            const sortedOtherAudio = sortAudioByQuality([...otherAudioFormats]);
+
+            // Combine in desired order: M4A first, then WebM, then others
+            const sortedAudioFormats = [...sortedM4a, ...sortedWebmAudio, ...sortedOtherAudio];
+
+            sortedAudioFormats.forEach(format => {
                 const option = document.createElement('option');
                 option.value = format.format_id;
 
@@ -372,8 +460,12 @@ function updateFormatSelect(formats) {
                     parts.push(codec);
                 }
 
-                // Add extension
-                parts.push(format.ext);
+                // Add extension (with emphasis for M4A/WebM)
+                if (format.ext === 'm4a' || format.ext === 'webm') {
+                    parts.push(format.ext.toUpperCase());
+                } else {
+                    parts.push(format.ext);
+                }
 
                 // Build size/bitrate info
                 let sizeInfo = '';
@@ -457,25 +549,58 @@ function startProgressPolling() {
     }
 
     progressInterval = setInterval(async () => {
-        if (!currentTaskId) return;
-
         try {
-            const response = await fetch(`${API_BASE_URL}/api/download-status/${currentTaskId}`);
-            if (!response.ok) {
-                throw new Error('获取下载状态失败');
+            // Check current task progress if exists
+            if (currentTaskId) {
+                const response = await fetch(`${API_BASE_URL}/api/download-status/${currentTaskId}`);
+                if (response.ok) {
+                    const status = await response.json();
+                    updateProgress(status);
+
+                    if (status.status === 'completed' || status.status === 'error') {
+                        clearInterval(progressInterval);
+                        progressInterval = null;
+                        return;
+                    }
+                }
             }
 
-            const status = await response.json();
-            updateProgress(status);
+            // Also check for any downloading tasks in history
+            await updateAllDownloadingTasks();
 
-            if (status.status === 'completed' || status.status === 'error') {
-                clearInterval(progressInterval);
-                progressInterval = null;
-            }
         } catch (error) {
             console.error('Error fetching progress:', error);
         }
     }, 1000);
+}
+
+// Update All Downloading Tasks in History
+async function updateAllDownloadingTasks() {
+    // Get all downloading tasks from history
+    const downloadingItems = document.querySelectorAll('.history-item[data-id]');
+
+    for (const item of downloadingItems) {
+        const taskId = item.dataset.id;
+        const historyProgress = item.querySelector('.history-progress');
+
+        // Only update items that have progress bars (downloading status)
+        if (!historyProgress || historyProgress.style.display === 'none') continue;
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/download-status/${taskId}`);
+            if (response.ok) {
+                const status = await response.json();
+                updateHistoryProgress(taskId, status);
+
+                // If this task just completed, we'll refresh history to show final state
+                if (status.status === 'completed' || status.status === 'error') {
+                    setTimeout(() => loadHistory(), 1000);
+                }
+            }
+        } catch (error) {
+            console.error(`Error updating progress for task ${taskId}:`, error);
+        }
+    }
 }
 
 // Update Progress
@@ -560,13 +685,114 @@ function updateProgress(status) {
         case 'completed':
             elements.progressStatus.textContent = '下载完成!';
             showDownloadComplete(status.filename);
+            // Refresh history to show completed status
+            setTimeout(() => loadHistory(), 500);
             break;
 
         case 'error':
             elements.progressStatus.textContent = '下载失败';
             alert('下载失败: ' + (status.message || '未知错误'));
             resetDownloadUI();
+            // Refresh history to show error status
+            setTimeout(() => loadHistory(), 500);
             break;
+    }
+
+    // Also update history if this task is in history
+    updateHistoryProgress(currentTaskId, status);
+}
+
+// Update History Progress
+function updateHistoryProgress(taskId, status) {
+    if (!taskId) return;
+
+    const historyItem = document.querySelector(`.history-item[data-id="${taskId}"]`);
+    if (!historyItem) return;
+
+    const historyProgress = historyItem.querySelector('.history-progress');
+    if (!historyProgress) return;
+
+    // Hide progress bar for completed or error status and update main status
+    if (status.status === 'completed' || status.status === 'error') {
+        historyProgress.style.display = 'none';
+
+        // Update the main status element in history item
+        const statusElement = historyItem.querySelector('.history-status');
+        if (statusElement) {
+            if (status.status === 'completed') {
+                statusElement.textContent = '已完成';
+                statusElement.className = 'history-status status-completed';
+            } else {
+                statusElement.textContent = '失败';
+                statusElement.className = 'history-status status-error';
+            }
+        }
+        return;
+    }
+
+    const progress = Math.round(status.progress || 0);
+
+    // Update progress bar and percentage
+    const progressPercent = historyProgress.querySelector('.progress-percent');
+    const progressFill = historyProgress.querySelector('.progress-fill');
+    const progressStatus = historyProgress.querySelector('.progress-status');
+
+    if (progressPercent) progressPercent.textContent = `${progress}%`;
+    if (progressFill) progressFill.style.width = `${progress}%`;
+
+    // Update status text based on phase
+    if (progressStatus && status.phase) {
+        switch (status.phase) {
+            case 'downloading_video':
+                progressStatus.textContent = '下载视频中...';
+                break;
+            case 'downloading_audio':
+                progressStatus.textContent = '下载音频中...';
+                break;
+            case 'merging':
+                progressStatus.textContent = '合并中...';
+                break;
+            case 'completed':
+                progressStatus.textContent = '完成!';
+                break;
+            default:
+                progressStatus.textContent = '下载中...';
+        }
+    }
+
+    // Update download statistics
+    const downloadSpeed = historyProgress.querySelector('.download-speed');
+    const downloadSize = historyProgress.querySelector('.download-size');
+    const totalSize = historyProgress.querySelector('.total-size');
+    const downloadEta = historyProgress.querySelector('.download-eta');
+
+    if (downloadSpeed) {
+        downloadSpeed.textContent = status.speed || '--';
+    }
+
+    if (downloadSize) {
+        downloadSize.textContent = status.downloaded_size || '--';
+    }
+
+    if (totalSize) {
+        totalSize.textContent = status.total_size || '--';
+    }
+
+    if (downloadEta && status.eta) {
+        const eta = status.eta;
+        if (eta > 3600) {
+            const hours = Math.floor(eta / 3600);
+            const minutes = Math.floor((eta % 3600) / 60);
+            downloadEta.textContent = `${hours}时${minutes}分`;
+        } else if (eta > 60) {
+            const minutes = Math.floor(eta / 60);
+            const seconds = eta % 60;
+            downloadEta.textContent = `${minutes}分${seconds}秒`;
+        } else {
+            downloadEta.textContent = `${eta}秒`;
+        }
+    } else if (downloadEta) {
+        downloadEta.textContent = '--';
     }
 }
 
@@ -575,6 +801,50 @@ function showDownloadComplete(filename) {
     elements.downloadProgress.classList.add('hidden');
     elements.downloadComplete.classList.remove('hidden');
     elements.downloadFilename.textContent = filename || '下载完成';
+}
+
+// Play Current Video
+async function playCurrentVideo() {
+    if (!currentTaskId) return;
+
+    try {
+        const videoUrl = `${API_BASE_URL}/api/download-file/${currentTaskId}`;
+        const filename = elements.downloadFilename.textContent || 'video.mp4';
+
+        // Create video modal
+        const modal = document.createElement('div');
+        modal.className = 'video-modal';
+        modal.innerHTML = `
+            <div class="video-modal-content">
+                <div class="video-modal-header">
+                    <h3>${filename}</h3>
+                    <button class="video-modal-close">&times;</button>
+                </div>
+                <video controls autoplay style="width: 100%; max-height: 70vh;">
+                    <source src="${videoUrl}" type="video/mp4">
+                    您的浏览器不支持视频播放
+                </video>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        // Close modal events
+        const closeBtn = modal.querySelector('.video-modal-close');
+        closeBtn.addEventListener('click', () => {
+            document.body.removeChild(modal);
+        });
+
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                document.body.removeChild(modal);
+            }
+        });
+
+    } catch (error) {
+        console.error('Error playing video:', error);
+        alert('播放视频失败: ' + error.message);
+    }
 }
 
 // Save File
@@ -647,7 +917,7 @@ function displayHistory(history) {
 
     elements.historyList.innerHTML = history.map(item => `
         <div class="history-item" data-id="${item.id}">
-            <img src="${item.thumbnail || ''}" alt="${item.title}" class="history-thumbnail">
+            <img src="${item.thumbnail ? `${API_BASE_URL}/api/proxy-thumbnail?url=${encodeURIComponent(item.thumbnail)}` : ''}" alt="${item.title}" class="history-thumbnail">
             <div class="history-details">
                 <div class="history-title">${item.title}</div>
                 <div class="history-meta">
@@ -658,6 +928,36 @@ function displayHistory(history) {
                 </span>
                 ${item.file_size ? `<span class="history-meta"> · ${formatFileSize(item.file_size)}</span>` : ''}
                 ${item.error_message ? `<div class="history-error">错误: ${item.error_message}</div>` : ''}
+
+                ${item.status === 'downloading' ? `
+                    <div class="history-progress">
+                        <div class="progress-info">
+                            <span class="progress-status">下载中...</span>
+                            <span class="progress-percent">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" style="width: 0%"></div>
+                        </div>
+                        <div class="download-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">速度:</span>
+                                <span class="download-speed stat-value">--</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">已下载:</span>
+                                <span class="download-size stat-value">--</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">总大小:</span>
+                                <span class="total-size stat-value">--</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">剩余时间:</span>
+                                <span class="download-eta stat-value">--</span>
+                            </div>
+                        </div>
+                    </div>
+                ` : ''}
             </div>
             <div class="history-actions">
                 ${item.status === 'completed' ? `
@@ -835,6 +1135,50 @@ function getStatusText(status) {
     return statusMap[status] || status;
 }
 
+// Update cookies status display
+async function updateCookiesStatus() {
+    try {
+        const cookiesResponse = await fetch(`${API_BASE_URL}/api/config/cookies`);
+        if (cookiesResponse.ok) {
+            const cookiesData = await cookiesResponse.json();
+            if (cookiesData.content) {
+                // 分析cookies内容并显示状态
+                const lines = cookiesData.content.split('\n').filter(line =>
+                    line.trim() && !line.startsWith('#')
+                );
+                const cookiesCount = lines.length;
+
+                if (cookiesCount > 0) {
+                    elements.cookiesStatus.innerHTML = `
+                        <span class="status-indicator status-success">✅ 已加载 ${cookiesCount} 个cookies</span>
+                    `;
+                } else {
+                    elements.cookiesStatus.innerHTML = `
+                        <span class="status-indicator status-warning">⚠️ cookies文件为空或无效</span>
+                    `;
+                }
+
+                // 同时更新输入框内容
+                elements.cookiesInput.value = cookiesData.content;
+            } else {
+                elements.cookiesStatus.innerHTML = `
+                    <span class="status-indicator status-error">❌ 无cookies配置</span>
+                `;
+                elements.cookiesInput.value = '';
+            }
+        } else {
+            elements.cookiesStatus.innerHTML = `
+                <span class="status-indicator status-error">❌ 无cookies配置</span>
+            `;
+        }
+    } catch (error) {
+        console.error('Error updating cookies status:', error);
+        elements.cookiesStatus.innerHTML = `
+            <span class="status-indicator status-error">❌ 获取cookies状态失败</span>
+        `;
+    }
+}
+
 // Settings Functions
 async function loadSettings() {
     try {
@@ -876,13 +1220,18 @@ async function loadSettings() {
             elements.customParams.value = config.custom_params.join('\n');
         }
 
-        // Load cookies separately
-        const cookiesResponse = await fetch(`${API_BASE_URL}/api/config/cookies`);
-        if (cookiesResponse.ok) {
-            const cookiesData = await cookiesResponse.json();
-            if (cookiesData.content) {
-                elements.cookiesInput.value = cookiesData.content;
-            }
+        // Load cookies and update status
+        await updateCookiesStatus();
+
+        if (config.wecom) {
+            elements.wecomCorpId.value = config.wecom.corp_id || '';
+            elements.wecomAgentId.value = config.wecom.agent_id ?? '';
+            elements.wecomAppSecret.value = config.wecom.app_secret || '';
+            elements.wecomToken.value = config.wecom.token || '';
+            elements.wecomEncodingKey.value = config.wecom.encoding_aes_key || '';
+            elements.wecomPublicUrl.value = config.wecom.public_base_url || '';
+            elements.wecomDefaultFormat.value = config.wecom.default_format_id || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
+            elements.wecomProxyDomain.value = config.wecom.proxy_domain || '';
         }
     } catch (error) {
         console.error('Error loading settings:', error);
@@ -907,6 +1256,8 @@ async function saveCookies() {
 
         if (response.ok) {
             alert('Cookies保存成功！');
+            // 立即更新cookie状态显示
+            await updateCookiesStatus();
         } else {
             alert('Cookies保存失败');
         }
@@ -921,6 +1272,29 @@ async function saveSettings() {
     const customParamsText = elements.customParams.value.trim();
     const customParams = customParamsText ? customParamsText.split('\n').filter(line => line.trim()) : [];
 
+    const corpId = elements.wecomCorpId.value.trim();
+    const agentIdRaw = elements.wecomAgentId.value.trim();
+    const appSecret = elements.wecomAppSecret.value.trim();
+    const token = elements.wecomToken.value.trim();
+    const encodingKey = elements.wecomEncodingKey.value.trim();
+    const publicUrl = elements.wecomPublicUrl.value.trim();
+    const defaultFormat = elements.wecomDefaultFormat.value.trim() || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
+    const proxyDomain = elements.wecomProxyDomain.value.trim();
+
+    if (encodingKey && encodingKey.length !== 43) {
+        alert('EncodingAESKey 必须为43位');
+        return;
+    }
+
+    let agentId = null;
+    if (agentIdRaw) {
+        agentId = Number(agentIdRaw);
+        if (Number.isNaN(agentId)) {
+            alert('AgentID 必须是数字');
+            return;
+        }
+    }
+
     const config = {
         proxy: elements.proxyInput.value.trim() || null,
         user_agent: elements.userAgentInput.value.trim(),
@@ -933,7 +1307,17 @@ async function saveSettings() {
             retries: parseInt(elements.retries.value),
             fragment_retries: parseInt(elements.fragmentRetries.value)
         },
-        custom_params: customParams
+        custom_params: customParams,
+        wecom: {
+            corp_id: corpId,
+            agent_id: agentId,
+            app_secret: appSecret,
+            token,
+            encoding_aes_key: encodingKey,
+            public_base_url: publicUrl,
+            default_format_id: defaultFormat,
+            proxy_domain: proxyDomain
+        }
     };
 
     try {
@@ -972,6 +1356,13 @@ async function resetSettings() {
     elements.fragmentRetries.value = 3;
     elements.cookiesInput.value = '';
     elements.customParams.value = '';
+    elements.wecomCorpId.value = '';
+    elements.wecomAgentId.value = '';
+    elements.wecomAppSecret.value = '';
+    elements.wecomToken.value = '';
+    elements.wecomEncodingKey.value = '';
+    elements.wecomPublicUrl.value = '';
+    elements.wecomDefaultFormat.value = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
 
     // Save default settings
     await saveSettings();

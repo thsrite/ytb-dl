@@ -10,7 +10,7 @@ downloads/
 # System files
 .DS_Store
 Thumbs.db
-
+.claude
 # Python
 __pycache__/
 *.py[cod]

@@ -1,20 +1,20 @@
-from fastapi import FastAPI, WebSocket, HTTPException
+from fastapi import FastAPI, WebSocket, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse, PlainTextResponse
 import os
-import json
 import logging
+import httpx
 from datetime import datetime
 from typing import List
 
-from models import (
-    VideoInfoRequest, VideoInfo, DownloadRequest,
-    DownloadProgress, DownloadHistory
+from ytb.models import (
+    VideoInfoRequest, VideoInfo, DownloadRequest
 )
-from downloader import YTDownloader
-from config import Config
-from history_manager import HistoryManager
+from ytb.downloader import YTDownloader
+from ytb.config import Config
+from ytb.history_manager import HistoryManager
+from wecom import WeComService
 
 app = FastAPI(title="YouTube Video Downloader API")
 
@@ -35,6 +35,9 @@ config = Config()
 
 # Initialize history manager
 history_manager = HistoryManager()
+
+# Initialize WeCom integration
+wecom_service = WeComService(config, downloader, history_manager)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -196,6 +199,30 @@ async def delete_history(task_id: str):
         raise HTTPException(status_code=404, detail="History entry not found")
 
 
+@app.get("/api/proxy-thumbnail")
+async def proxy_thumbnail(url: str):
+    """代理YouTube缩略图"""
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url)
+            response.raise_for_status()
+
+            # 获取内容类型
+            content_type = response.headers.get("content-type", "image/jpeg")
+
+            return StreamingResponse(
+                iter([response.content]),
+                media_type=content_type,
+                headers={
+                    "Cache-Control": "public, max-age=3600",
+                    "Access-Control-Allow-Origin": "*"
+                }
+            )
+    except Exception as e:
+        logger.error(f"Error proxying thumbnail {url}: {e}")
+        raise HTTPException(status_code=404, detail="Unable to fetch thumbnail")
+
+
 @app.websocket("/ws/progress")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket连接用于实时进度更新"""
@@ -323,11 +350,74 @@ async def update_config(updates: dict):
         raise HTTPException(status_code=500, detail="Failed to update config")
 
 
+@app.get("/api/wecom/config")
+async def get_wecom_config():
+    """获取企业微信集成配置"""
+    return config.get_wecom_config()
+
+
+@app.post("/api/wecom/config")
+async def update_wecom_config(updates: dict):
+    """更新企业微信集成配置并刷新服务"""
+    clean_updates = {}
+    for key, value in updates.items():
+        if key == "agent_id" and value not in (None, ""):
+            try:
+                clean_updates[key] = int(value)
+            except ValueError as exc:  # noqa: BLE001
+                raise HTTPException(status_code=400, detail="AgentID 必须是整数") from exc
+        else:
+            clean_updates[key] = value or ""
+
+    encoding_key = clean_updates.get("encoding_aes_key")
+    if encoding_key and len(encoding_key) != 43:
+        raise HTTPException(status_code=400, detail="EncodingAESKey 必须为43位")
+
+    current = config.get_wecom_config()
+    current.update(clean_updates)
+
+    if not config.update_config({"wecom": current}):
+        raise HTTPException(status_code=500, detail="保存配置失败")
+
+    wecom_service.reload_config()
+    return {"message": "WeCom config updated"}
+
+
+@app.get("/api/wecom/callback")
+async def wecom_verify(
+    msg_signature: str,
+    timestamp: str,
+    nonce: str,
+    echostr: str,
+):
+    """企业微信回调URL验证"""
+    echo = wecom_service.verify_url(msg_signature, timestamp, nonce, echostr)
+    return PlainTextResponse(echo)
+
+
+@app.post("/api/wecom/callback")
+async def wecom_callback(
+    request: Request,
+    msg_signature: str,
+    timestamp: str,
+    nonce: str,
+):
+    """企业微信消息回调处理"""
+    body = (await request.body()).decode("utf-8")
+    response_text = await wecom_service.handle_callback(
+        msg_signature,
+        timestamp,
+        nonce,
+        body,
+    )
+    return PlainTextResponse(response_text)
+
+
 @app.get("/api/config/cookies")
 async def get_cookies():
     """获取cookies内容"""
     try:
-        cookies_file = "cookies.txt"
+        cookies_file = os.path.join("config", "cookies.txt")
         if os.path.exists(cookies_file):
             with open(cookies_file, 'r', encoding='utf-8') as f:
                 content = f.read()
@@ -346,11 +436,14 @@ async def upload_cookies(data: dict):
         if not content:
             raise HTTPException(status_code=400, detail="No cookies content provided")
 
-        cookies_file = "cookies.txt"
+        cookies_file = os.path.join("config", "cookies.txt")
+        # 确保config目录存在
+        os.makedirs("config", exist_ok=True)
+
         with open(cookies_file, 'w', encoding='utf-8') as f:
             f.write(content)
 
-        config.update_config({"cookies_file": cookies_file})
+        # 重新加载下载器配置以应用新的cookies
         downloader.config = Config()
 
         return {"message": "Cookies uploaded successfully"}

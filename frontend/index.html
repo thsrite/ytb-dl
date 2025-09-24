@@ -136,6 +136,9 @@
                             <p id="download-filename"></p>
                         </div>
                         <div class="download-actions">
+                            <button id="play-video-btn" class="btn btn-success">
+                                ▶️ 播放
+                            </button>
                             <button id="save-file-btn" class="btn btn-primary">
                                 💾 保存文件
                             </button>
@@ -176,6 +179,11 @@
                     <div class="settings-section">
                         <h3 class="settings-subtitle">YouTube Cookies</h3>
                         <p class="settings-description">上传cookies.txt文件以绕过年龄限制和地区限制</p>
+
+                        <div class="cookies-status" id="cookies-status">
+                            <span class="status-indicator">🔍 检查中...</span>
+                        </div>
+
                         <textarea id="cookies-input" class="textarea" placeholder="粘贴cookies.txt内容..."></textarea>
                         <button id="save-cookies-btn" class="btn btn-primary">保存Cookies</button>
                     </div>
@@ -251,6 +259,60 @@
 --buffer-size 2048
 --http-chunk-size 10485760"></textarea>
                         </div>
+                    </div>
+
+                    <div class="separator"></div>
+
+                    <!-- 企业微信配置 -->
+                    <div class="settings-section">
+                        <h3 class="settings-subtitle">企业微信集成</h3>
+                        <p class="settings-description">配置企业微信自建应用的凭证与回调信息，方便通过企业微信触发下载。</p>
+
+                        <div class="settings-grid">
+                            <div class="settings-col">
+                                <label class="input-label">CorpID</label>
+                                <input type="text" id="wecom-corp-id" class="input" placeholder="企业ID">
+                            </div>
+                            <div class="settings-col">
+                                <label class="input-label">AgentID</label>
+                                <input type="number" id="wecom-agent-id" class="input" placeholder="应用AgentID">
+                            </div>
+                        </div>
+
+                        <div class="settings-grid">
+                            <div class="settings-col">
+                                <label class="input-label">App Secret</label>
+                                <input type="password" id="wecom-app-secret" class="input" placeholder="应用Secret">
+                            </div>
+                            <div class="settings-col">
+                                <label class="input-label">Token</label>
+                                <input type="text" id="wecom-token" class="input" placeholder="回调Token">
+                            </div>
+                        </div>
+
+                        <div class="settings-grid">
+                            <div class="settings-col">
+                                <label class="input-label">EncodingAESKey</label>
+                                <input type="text" id="wecom-encoding-key" class="input" placeholder="43位EncodingAESKey">
+                            </div>
+                            <div class="settings-col">
+                                <label class="input-label">公网回调基础URL</label>
+                                <input type="text" id="wecom-public-url" class="input" placeholder="例如 https://example.com">
+                            </div>
+                        </div>
+
+                        <div class="settings-grid">
+                            <div class="settings-col">
+                                <label class="input-label">默认下载格式表达式</label>
+                                <input type="text" id="wecom-default-format" class="input"
+                                       value="bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best">
+                            </div>
+                            <div class="settings-col">
+                                <label class="input-label">代理域名（可选）</label>
+                                <input type="text" id="wecom-proxy-domain" class="input" placeholder="例如 https://proxy.example.com">
+                            </div>
+                        </div>
+
                     </div>
 
                     <div class="settings-actions">

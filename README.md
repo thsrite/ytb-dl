@@ -185,7 +185,7 @@ ws://localhost:8000/ws
 ### 命令行使用
 
 ```python
-from downloader import YTDownloader
+from ytb.downloader import YTDownloader
 
 # 初始化下载器
 dl = YTDownloader()

@@ -6,14 +6,14 @@ import json
 from typing import Optional, Dict, Any
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from config import Config
+from .config import Config
 
 # Setup logger
 logger = logging.getLogger(__name__)
 
 
 class YTDownloader:
-    def __init__(self, download_dir: str = "../downloads"):
+    def __init__(self, download_dir: str = "downloads"):
         self.download_dir = download_dir
         os.makedirs(download_dir, exist_ok=True)
         self.executor = ThreadPoolExecutor(max_workers=3)
@@ -188,8 +188,12 @@ class YTDownloader:
             'progress': {'percent': 0}
         }
 
-        # Set up download options
-        format_str = format_id or 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+        # Set up download options - use config's default format
+        default_format = self.config.get_wecom_config().get(
+            "default_format_id",
+            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"
+        )
+        format_str = format_id or default_format
         output_template = os.path.join(self.download_dir, '%(title)s.%(ext)s')
 
         ydl_opts = self.config.get_ydl_opts({

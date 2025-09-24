@@ -6,8 +6,13 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class HistoryManager:
-    def __init__(self, history_file: str = "download_history.json"):
+    def __init__(self, history_file: Optional[str] = None):
+        if history_file is None:
+            # Default path relative to the project root
+            base_dir = os.path.dirname(os.path.dirname(__file__))  # Go up two levels from ytb/history_manager.py
+            history_file = os.path.join(base_dir, "config", "download_history.json")
         self.history_file = history_file
         self.history: List[Dict[str, Any]] = []
         self.load_history()
@@ -28,6 +33,9 @@ class HistoryManager:
     def save_history(self) -> bool:
         """保存历史记录到文件"""
         try:
+            directory = os.path.dirname(self.history_file)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
             with open(self.history_file, 'w', encoding='utf-8') as f:
                 json.dump(self.history, f, indent=2, ensure_ascii=False, default=str)
             return True
