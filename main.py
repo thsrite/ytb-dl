@@ -49,7 +49,15 @@ active_connections: List[WebSocket] = []
 
 @app.get("/")
 async def root():
-    return {"message": "YouTube Downloader API", "version": "1.0.0"}
+    """返回主页面"""
+    try:
+        frontend_path = os.path.join(os.path.dirname(__file__), "frontend", "index.html")
+        if os.path.exists(frontend_path):
+            return FileResponse(frontend_path)
+        else:
+            return {"message": "YouTube Downloader API", "version": "1.0.0", "error": "Frontend not found"}
+    except Exception as e:
+        return {"message": "YouTube Downloader API", "version": "1.0.0", "error": str(e)}
 
 
 @app.post("/api/video-info", response_model=VideoInfo)
@@ -451,8 +459,16 @@ async def upload_cookies(data: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 # Serve frontend static files
-if os.path.exists("../frontend"):
-    app.mount("/static", StaticFiles(directory="../frontend"), name="static")
+frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")
+if os.path.exists(frontend_dir):
+    app.mount("/static", StaticFiles(directory=frontend_dir), name="static")
+    # Also serve CSS and JS files directly
+    css_dir = os.path.join(frontend_dir, "css")
+    js_dir = os.path.join(frontend_dir, "js")
+    if os.path.exists(css_dir):
+        app.mount("/css", StaticFiles(directory=css_dir), name="css")
+    if os.path.exists(js_dir):
+        app.mount("/js", StaticFiles(directory=js_dir), name="js")
 
 
 if __name__ == "__main__":
