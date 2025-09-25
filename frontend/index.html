@@ -10,7 +10,6 @@
     <div class="container">
         <header class="header">
             <h1 class="title">🎬 YouTube 视频下载器</h1>
-            <p class="subtitle">轻松下载 YouTube 视频，支持最佳质量和音视频合并</p>
         </header>
 
         <!-- Tabs -->
@@ -167,7 +166,7 @@
                                 <polyline points="3 6 5 6 21 6"></polyline>
                                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
                             </svg>
-                            批量删除
+                            删除
                         </button>
                     </div>
                 </div>
@@ -195,11 +194,6 @@
                         <div class="settings-section settings-left">
                             <h3 class="settings-subtitle">YouTube Cookies</h3>
                             <p class="settings-description">自动从浏览器提取或手动上传cookies</p>
-
-                            <div class="cookies-status" id="cookies-status">
-                                <span class="status-indicator">🔍 检查中...</span>
-                            </div>
-
                             <!-- Browser Cookie Options -->
                             <div class="browser-cookie-section">
                                 <label class="input-label">浏览器Cookie提取</label>
@@ -226,13 +220,7 @@
                                         自动刷新 (每25分钟)
                                     </label>
                                 </div>
-
-                                <div id="browser-cookie-status" class="browser-status hidden">
-                                    <span class="status-text"></span>
-                                </div>
                             </div>
-
-                            <div class="separator-mini"></div>
 
                             <!-- CookieCloud 同步设置 -->
                             <div class="cookiecloud-section">
@@ -268,8 +256,6 @@
                                     </div>
                                 </div>
                             </div>
-
-                            <div class="separator-mini"></div>
 
                             <!-- Cookie状态显示 -->
                             <div id="cookie-count-display" class="cookie-status-display">
@@ -443,8 +429,6 @@
                                 <input type="text" id="wecom-proxy-domain" class="input" placeholder="例如 https://proxy.example.com">
                             </div>
                         </div>
-
-                        <div class="separator-mini"></div>
 
                         <!-- 管理员通知设置 -->
                         <h4 class="settings-subtitle">管理员通知设置</h4>

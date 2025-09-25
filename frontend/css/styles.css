@@ -24,7 +24,7 @@ body {
     text-align: center;
     margin-bottom: 40px;
     color: white;
-    padding: 20px 0;
+    padding: 0px 0;
 }
 
 .title {
@@ -432,6 +432,31 @@ body {
     gap: 20px;
 }
 
+#history-tab .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 10 24px;
+    border-radius: 20px 20px 0 0;
+}
+
+#history-tab .card-header .card-title {
+    margin-bottom: 0;
+}
+
+#history-tab .card-header .history-actions-bar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 0;
+    border: none;
+    margin: 0;
+    margin-left: auto;
+}
+
 .history-item {
     display: flex;
     gap: 20px;
@@ -451,9 +476,16 @@ body {
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
 }
 
+.history-thumbnail-wrapper {
+    position: relative;
+    width: 142px;
+    height: 80px;
+    flex-shrink: 0;
+}
+
 .history-thumbnail {
-    width: 140px;
-    height: 78px;
+    width: 100%;
+    height: 100%;
     object-fit: cover;
     border-radius: 12px;
     background: linear-gradient(135deg, #f3f4f6, #e5e7eb);
@@ -463,6 +495,19 @@ body {
 
 .history-thumbnail:hover {
     transform: scale(1.05);
+}
+
+.history-thumbnail-wrapper .history-checkbox {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 20px;
+    height: 20px;
+    z-index: 1;
+    background: white;
+    border-radius: 4px;
+    cursor: pointer;
+    opacity: 0.9;
 }
 
 .history-details {
@@ -487,6 +532,7 @@ body {
     border-radius: 4px;
     font-size: 0.85rem;
     font-weight: 500;
+    margin-right: 8px;
 }
 
 .status-completed {
@@ -504,10 +550,30 @@ body {
     color: #991b1b;
 }
 
+.history-status-row {
+    display: inline-block;
+}
+
+.history-status-row .history-status {
+    margin-right: 8px;
+}
+
 .history-error {
     color: #dc3545;
     font-size: 0.85rem;
     margin-top: 4px;
+}
+
+.history-error-inline {
+    color: #ef4444;
+    font-size: 0.8rem;
+    margin-left: 4px;
+}
+
+.history-size-inline {
+    color: #6b7280;
+    font-size: 0.85rem;
+    margin-left: 8px;
 }
 
 .btn-retry {
@@ -793,7 +859,6 @@ body {
 
 /* CookieCloud Section */
 .cookiecloud-section {
-    background: rgba(30, 30, 50, 0.4);
     padding: 15px;
     border-radius: 8px;
     margin: 15px 0;
@@ -897,30 +962,77 @@ body {
 }
 
 .btn-icon {
-    width: 36px;
-    height: 36px;
+    padding: 10px;
     border: none;
     border-radius: 8px;
-    background: white;
-    color: #666;
+    background: #6366f1;
+    color: white;
     cursor: pointer;
-    display: flex;
+    display: inline-flex;
     align-items: center;
     justify-content: center;
+    gap: 6px;
     transition: all 0.3s ease;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    font-size: 13px;
+    font-weight: 500;
+    margin: 0 4px;
+    box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+    min-width: 44px;
 }
 
 .btn-icon:hover {
-    background: #667eea;
-    color: white;
     transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(102, 126, 234, 0.3);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
 }
 
+.btn-icon:active {
+    transform: translateY(0);
+}
+
+.btn-icon svg {
+    width: 18px;
+    height: 18px;
+    stroke-width: 2;
+}
+
+/* Hide text in desktop */
+.btn-icon span {
+    display: none;
+}
+
+/* Download button - 绿色 */
+.history-actions .btn-icon:nth-child(2):not(.btn-delete) {
+    background: #10b981;
+    box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3);
+}
+
+.history-actions .btn-icon:nth-child(2):not(.btn-delete):hover {
+    background: #059669;
+    box-shadow: 0 4px 12px rgba(34, 197, 94, 0.4);
+}
+
+/* Delete button - 红色 (提高优先级) */
+.history-actions .btn-icon.btn-delete,
+.btn-icon.btn-delete {
+    background: #ef4444 !important;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3);
+}
+
+.history-actions .btn-icon.btn-delete:hover,
 .btn-icon.btn-delete:hover {
-    background: #ef4444;
-    box-shadow: 0 4px 8px rgba(239, 68, 68, 0.3);
+    background: #dc2626 !important;
+    box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+}
+
+/* Retry button - 橙色 */
+.btn-icon.btn-retry {
+    background: #f97316;
+    box-shadow: 0 2px 8px rgba(245, 158, 11, 0.3);
+}
+
+.btn-icon.btn-retry:hover {
+    background: #ea580c;
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
 }
 
 /* Video Modal */
@@ -1026,7 +1138,8 @@ body {
 
     /* Header */
     .header {
-        padding: 20px 0;
+        padding: 12px 0 10px;
+        margin-bottom: 16px;
     }
 
     .title {
@@ -1042,7 +1155,7 @@ body {
     /* Tabs */
     .tabs {
         gap: 8px;
-        margin-bottom: 20px;
+        margin-bottom: 16px;
     }
 
     .tab-button {
@@ -1125,9 +1238,13 @@ body {
     }
 
     .video-meta {
-        grid-template-columns: 1fr;
-        gap: 8px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
         font-size: 0.85rem;
+    }
+
+    .video-meta .meta-item {
+        min-width: 0;
     }
 
     /* Format select */
@@ -1691,6 +1808,400 @@ body {
     .version-info {
         font-size: 0.8rem;
     }
+
+    /* 移动端下载历史页面样式 */
+    #history-tab .card {
+        background: transparent;
+        box-shadow: none;
+        padding: 0;
+        margin: 0;
+    }
+
+    #history-tab .card-header {
+        background: white;
+        border-radius: 16px;
+        padding: 0 12px;
+        margin: 0 0 7px 0;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+    }
+
+    #history-tab .card-title {
+        font-size: 18px;
+        font-weight: 600;
+        color: #1f2937;
+        text-align: center;
+        margin: 0;
+        margin-bottom: 2px;
+    }
+
+    .history-actions-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 4px 0;
+        background: transparent;
+        border-radius: 0;
+        margin: 0;
+    }
+
+    .history-actions-bar .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 14px;
+        color: #4b5563;
+        font-weight: 500;
+        white-space: nowrap;
+    }
+
+    .history-actions-bar .checkbox-label input[type="checkbox"] {
+        width: 1em;
+        height: 1em;
+        accent-color: #6366f1;
+        cursor: pointer;
+        margin: 0;
+    }
+
+    .history-actions-bar .selected-count {
+        font-size: 14px;
+        color: #6b7280;
+        flex: 1;
+        text-align: center;
+        white-space: nowrap;
+    }
+
+    #batch-delete-btn {
+        padding: 0;
+        width: 40px;
+        height: 40px;
+        font-size: 0;
+        background: #ef4444;
+        color: white;
+        border: none;
+        border-radius: 12px;
+        font-weight: 600;
+        min-width: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 1;
+    }
+
+    #batch-delete-btn:active {
+        background: #dc2626;
+    }
+
+    #batch-delete-btn:disabled {
+        background: #e5e7eb;
+        color: #9ca3af;
+    }
+
+    #batch-delete-btn svg {
+        display: block;
+        margin: 0 !important;
+        width: 18px;
+        height: 18px;
+        transform: translate(4px,0px);
+    }
+
+    #history-tab .card-content {
+        background: transparent;
+        padding: 6px 0 12px 0;
+    }
+
+    /* 移动端历史项目样式优化 - 更紧凑 */
+    .history-item {
+        background: white;
+        border-radius: 10px;
+        padding: 0;
+        margin: 0 0 -7px 0;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+        border: 1px solid #e5e7eb;
+        overflow: hidden;
+    }
+
+    .history-item:active {
+        background: #f9fafb;
+    }
+
+    .history-thumbnail-wrapper {
+        position: relative;
+        width: 100%;
+        height: 150px;
+    }
+
+    .history-thumbnail {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+    }
+
+    .history-thumbnail-wrapper .history-checkbox {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        width: 22px;
+        height: 22px;
+        z-index: 1;
+        background: white;
+        border-radius: 4px;
+        cursor: pointer;
+        opacity: 0.95;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    }
+
+    .history-details {
+        padding: 8px 10px 4px;
+        flex: 1;
+    }
+
+    .history-title-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 4px;
+        margin-bottom: 2px;
+    }
+
+    .history-title {
+        flex: 1;
+        min-width: 0;
+        font-size: 15px;
+        line-height: 1.2;
+        font-weight: 500;
+        color: #1f2937;
+    }
+
+    .history-meta {
+        font-size: 12px;
+        color: #6b7280;
+        margin-bottom: 4px;
+        line-height: 1.2;
+    }
+
+    .history-status {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 14px;
+        font-weight: 500;
+        flex-shrink: 0;
+        margin-right: 8px;
+        vertical-align: middle;
+    }
+
+    .history-status-row {
+        display: block;
+        margin-bottom: 0;
+    }
+
+    .history-status-row .history-status {
+        display: inline-block;
+        margin-right: 8px;
+    }
+
+    .history-error-inline {
+        font-size: 11px;
+        color: #ef4444;
+        display: inline;
+        margin: 0;
+        line-height: 1.4;
+        word-break: break-word;
+    }
+
+    .history-size-inline {
+        font-size: 11px;
+        color: #6b7280;
+        display: inline;
+        margin: 0;
+        line-height: 1.4;
+        font-weight: normal;
+    }
+
+    /* 移动端操作按钮区域 */
+    .history-actions-mobile {
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        padding: 12px;
+        gap: 12px;
+        width: 100%;
+        text-align: center;
+        margin: -27px 0px -20px 0px;
+    }
+
+    /* 移动端大按钮样式 */
+    .btn-mobile {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px 0;
+        width: 102px;
+        height: 44px;
+        background: white;
+        border: none;
+        border-radius: 24px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+        transition: all 0.2s;
+        flex: none;
+    }
+
+    .btn-mobile:active {
+        transform: scale(0.96);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    }
+
+    .btn-mobile svg {
+        width: 20px;
+        height: 20px;
+    }
+
+    /* 播放按钮 - 蓝紫色 */
+    .btn-mobile.btn-play {
+        background: #6366f1;
+        color: white;
+    }
+
+    /* 下载按钮 - 绿色 */
+    .btn-mobile.btn-download {
+        background: #10b981;
+        color: white;
+    }
+
+    /* 删除按钮 - 红色 */
+    .btn-mobile.btn-delete {
+        background: #ef4444;
+        color: white;
+    }
+
+    /* 重试按钮 - 橙色 */
+    .btn-mobile.btn-retry {
+        background: #f97316;
+        color: white;
+    }
+
+    .history-error-message {
+        font-size: 11px;
+        color: #ef4444;
+        margin-top: 4px;
+        line-height: 1.3;
+        word-break: break-word;
+    }
+
+
+    /* 历史项目操作按钮 - 移动端旧版（保留以防需要） */
+    .history-actions-old {
+        display: none;
+    }
+
+    /* 移动端按钮样式 */
+    .btn-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 10px;
+        min-width: 45px;
+        background: white;
+        border: 1px solid #e5e7eb;
+        border-radius: 50px;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+        gap: 4px;
+        flex: 1;
+        flex-direction: row;
+        font-size: 12px;
+        font-weight: 500;
+        transition: all 0.2s;
+    }
+
+    .btn-icon:active {
+        transform: scale(0.96);
+        box-shadow: none;
+    }
+
+    /* 移动端始终隐藏文字 */
+    .btn-icon span {
+        display: none;
+    }
+
+    .btn-icon svg {
+        width: 20px;
+        height: 20px;
+        stroke-width: 2;
+    }
+
+    /* 播放按钮 - 蓝紫色 */
+    .btn-icon:first-child:not(.btn-retry):not(.btn-delete) {
+        background: #6366f1;
+        border-color: #6366f1;
+        color: white;
+    }
+
+    /* 下载按钮 - 绿色 */
+    .btn-icon:nth-child(2):not(.btn-delete) {
+        background: #10b981;
+        border-color: #10b981;
+        color: white;
+    }
+
+    /* 删除按钮 - 红色 */
+    .btn-icon.btn-delete {
+        background: #ef4444;
+        border-color: #ef4444;
+        color: white;
+    }
+
+    /* 重试按钮 - 橙色 */
+    .btn-icon.btn-retry {
+        background: #f97316;
+        border-color: #f97316;
+        color: white;
+    }
+
+    /* 当删除按钮是最后一个时也用红色（错误状态下） */
+    .history-actions:has(.btn-retry) .btn-icon.btn-delete {
+        background: #ef4444;
+        border-color: #ef4444;
+        color: white;
+    }
+
+    .btn-icon span,
+    .btn-icon svg {
+        color: white;
+    }
+
+    .no-history {
+        text-align: center;
+        padding: 60px 20px;
+        color: #9ca3af;
+        font-size: 14px;
+    }
+
+    /* 移动端卡片样式优化 */
+    .card {
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        border: none;
+    }
+
+    .card-header {
+        padding: 16px;
+        background: white;
+        border-radius: 16px 16px 0 0;
+    }
+
+    .card-content {
+        padding: 16px;
+        background: #f9fafb;
+        border-radius: 0 0 16px 16px;
+    }
+
+    /* 历史列表容器 */
+    .history-list {
+        background: transparent;
+        padding: 0;
+    }
 }
 /* Cookie Status Display */
 .cookie-status-display {
@@ -1768,12 +2279,9 @@ body {
     gap: 16px;
 }
 
-.history-checkbox {
-    width: 20px;
-    height: 20px;
-    margin-top: 20px;
-    cursor: pointer;
-    flex-shrink: 0;
+.history-title-row {
+    display: flex;
+    align-items: center;
 }
 
 .card-header {

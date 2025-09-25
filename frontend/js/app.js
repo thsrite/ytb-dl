@@ -775,6 +775,10 @@ function updateHistoryProgress(taskId, status) {
         return;
     }
 
+    if (status.status === 'downloading' || status.status === 'processing') {
+        historyProgress.style.display = 'block';
+    }
+
     const progress = Math.round(status.progress || 0);
 
     // Update progress bar and percentage
@@ -962,83 +966,165 @@ function displayHistory(history) {
     elements.noHistory.classList.add('hidden');
     document.getElementById('history-actions-bar').classList.remove('hidden');
 
-    elements.historyList.innerHTML = history.map(item => `
-        <div class="history-item" data-id="${item.id}">
-            <input type="checkbox" class="history-checkbox" data-item-id="${item.id}">
-            <img src="${item.thumbnail ? `${API_BASE_URL}/api/proxy-thumbnail?url=${encodeURIComponent(item.thumbnail)}` : ''}" alt="${item.title}" class="history-thumbnail">
-            <div class="history-details">
-                <div class="history-title">${item.title}</div>
-                <div class="history-meta">
-                    ${item.uploader || '未知作者'} · ${formatDate(item.downloaded_at)}
-                </div>
-                <span class="history-status status-${item.status}">
-                    ${getStatusText(item.status)}
-                </span>
-                ${item.file_size ? `<span class="history-meta"> · ${formatFileSize(item.file_size)}</span>` : ''}
-                ${item.error_message ? `<div class="history-error">错误: ${item.error_message}</div>` : ''}
+    const isMobile = window.innerWidth <= 768;
 
-                ${item.status === 'downloading' ? `
-                    <div class="history-progress">
-                        <div class="progress-info">
-                            <span class="progress-status">下载中...</span>
-                            <span class="progress-percent">0%</span>
-                        </div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" style="width: 0%"></div>
-                        </div>
-                        <div class="download-stats">
-                            <div class="stat-item">
-                                <span class="stat-label">速度:</span>
-                                <span class="download-speed stat-value">--</span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-label">已下载:</span>
-                                <span class="download-size stat-value">--</span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-label">总大小:</span>
-                                <span class="total-size stat-value">--</span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-label">剩余时间:</span>
-                                <span class="download-eta stat-value">--</span>
-                            </div>
-                        </div>
+    const renderProgressSection = (item) => {
+        const isActive = item && (item.status === 'downloading' || item.status === 'processing');
+        const progressValue = Math.round(item?.progress || 0);
+        const phaseMap = {
+            downloading_video: '下载视频中...',
+            downloading_audio: '下载音频中...',
+            merging: '合并中...'
+        };
+        const progressLabel = item?.phase ? (phaseMap[item.phase] || '下载中...')
+            : item?.status === 'processing'
+                ? '处理中...'
+                : '下载中...';
+
+        const etaText = item && item.eta ? formatEtaValue(item.eta) : '--';
+
+        return `
+            <div class="history-progress" style="display: ${isActive ? 'block' : 'none'};">
+                <div class="progress-info">
+                    <span class="progress-status">${progressLabel}</span>
+                    <span class="progress-percent">${progressValue}%</span>
+                </div>
+                <div class="progress-bar">
+                    <div class="progress-fill" style="width: ${progressValue}%"></div>
+                </div>
+                <div class="download-stats">
+                    <div class="stat-item">
+                        <span class="stat-label">速度</span>
+                        <span class="stat-value download-speed">${item?.speed || '--'}</span>
                     </div>
-                ` : ''}
+                    <div class="stat-item">
+                        <span class="stat-label">已下载</span>
+                        <span class="stat-value download-size">${item?.downloaded_size || '--'}</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">总大小</span>
+                        <span class="stat-value total-size">${item?.total_size || '--'}</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">剩余时间</span>
+                        <span class="stat-value download-eta">${etaText}</span>
+                    </div>
+                </div>
             </div>
-            <div class="history-actions">
-                ${item.status === 'completed' ? `
-                    <button class="btn-icon" onclick="playVideo('${item.id}')" title="播放">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polygon points="5 3 19 12 5 21 5 3"></polygon>
-                        </svg>
-                    </button>
-                    <button class="btn-icon" onclick="downloadVideo('${item.id}')" title="下载">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                            <polyline points="7 10 12 15 17 10"></polyline>
-                            <line x1="12" y1="15" x2="12" y2="3"></line>
-                        </svg>
-                    </button>
-                ` : item.status === 'error' ? `
-                    <button class="btn-icon btn-retry" onclick="retryDownload('${item.url}')" title="重试下载">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M1 4v6h6"></path>
-                            <path d="M23 20v-6h-6"></path>
-                            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"></path>
-                        </svg>
-                    </button>
-                ` : ''}
-                <button class="btn-icon btn-delete" onclick="deleteHistoryItem('${item.id}')" title="删除">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="3 6 5 6 21 6"></polyline>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                </button>
-            </div>
-        </div>
-    `).join('');
+        `;
+    };
+
+    elements.historyList.innerHTML = history.map(item => {
+        if (isMobile) {
+            // Mobile layout with inline buttons
+            return `
+                <div class="history-item" data-id="${item.id}">
+                    <div class="history-thumbnail-wrapper">
+                        <input type="checkbox" class="history-checkbox" data-item-id="${item.id}">
+                        <img src="${item.thumbnail ? `${API_BASE_URL}/api/proxy-thumbnail?url=${encodeURIComponent(item.thumbnail)}` : ''}" alt="${item.title}" class="history-thumbnail">
+                    </div>
+                    <div class="history-details">
+                        <div class="history-title-row">
+                            <div class="history-title">
+                                <span class="history-status status-${item.status}">
+                                    ${getStatusText(item.status)}
+                                </span>
+                                ${item.title}
+                            </div>
+                        </div>
+                        <div class="history-meta">
+                            ${item.uploader || '未知作者'} · ${item.file_size && item.status === 'completed' ? `${formatFileSize(item.file_size)} · ` : ''}${formatDate(item.downloaded_at)}
+                        </div>
+                        ${renderProgressSection(item)}
+                        ${item.error_message ? `<div class="history-error-message">${item.error_message}</div>` : ''}
+                    </div>
+                    <div class="history-actions-mobile">
+                        ${item.status === 'completed' ? `
+                            <button class="btn-mobile btn-play" onclick="playVideo('${item.id}')" title="播放">
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M8 5v14l11-7z"/>
+                                </svg>
+                            </button>
+                            <button class="btn-mobile btn-download" onclick="downloadVideo('${item.id}')" title="下载">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="7 10 12 15 17 10"/>
+                                    <line x1="12" y1="15" x2="12" y2="3"/>
+                                </svg>
+                            </button>
+                        ` : item.status === 'error' ? `
+                            <button class="btn-mobile btn-retry" onclick="retryDownload('${item.url}')" title="重试">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                    <path d="M1 4v6h6"/>
+                                    <path d="M23 20v-6h-6"/>
+                                    <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+                                </svg>
+                            </button>
+                        ` : ''}
+                        <button class="btn-mobile btn-delete" onclick="deleteHistoryItem('${item.id}')" title="删除">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            `;
+        } else {
+            // Desktop layout with separate actions section
+            return `
+                <div class="history-item" data-id="${item.id}">
+                    <div class="history-thumbnail-wrapper">
+                        <input type="checkbox" class="history-checkbox" data-item-id="${item.id}">
+                        <img src="${item.thumbnail ? `${API_BASE_URL}/api/proxy-thumbnail?url=${encodeURIComponent(item.thumbnail)}` : ''}" alt="${item.title}" class="history-thumbnail">
+                    </div>
+                    <div class="history-details">
+                        <div class="history-title">
+                            <span class="history-status status-${item.status}">
+                                ${getStatusText(item.status)}
+                            </span>
+                            ${item.title}
+                        </div>
+                        <div class="history-meta">
+                            ${item.uploader || '未知作者'} · ${item.file_size && item.status === 'completed' ? `${formatFileSize(item.file_size)} · ` : ''}${formatDate(item.downloaded_at)}
+                        </div>
+                        ${renderProgressSection(item)}
+                        ${item.error_message ? `<div class="history-error">${item.error_message}</div>` : ''}
+                    </div>
+                    <div class="history-actions">
+                        ${item.status === 'completed' ? `
+                            <button class="btn-icon" onclick="playVideo('${item.id}')" title="播放">
+                                <svg viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M8 5v14l11-7z"/>
+                                </svg>
+                            </button>
+                            <button class="btn-icon" onclick="downloadVideo('${item.id}')" title="下载">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                    <polyline points="7 10 12 15 17 10"/>
+                                    <line x1="12" y1="15" x2="12" y2="3"/>
+                                </svg>
+                            </button>
+                        ` : item.status === 'error' ? `
+                            <button class="btn-icon btn-retry" onclick="retryDownload('${item.url}')" title="重试">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M1 4v6h6"/>
+                                    <path d="M23 20v-6h-6"/>
+                                    <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 0 1 3.51 15"/>
+                                </svg>
+                            </button>
+                        ` : ''}
+                        <button class="btn-icon btn-delete" onclick="deleteHistoryItem('${item.id}')" title="删除">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="3 6 5 6 21 6"/>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+    }).join('');
 }
 
 // WebSocket for real-time updates
@@ -1181,6 +1267,23 @@ function getStatusText(status) {
         'error': '失败'
     };
     return statusMap[status] || status;
+}
+
+function formatEtaValue(eta) {
+    if (eta == null) return '--';
+    if (typeof eta !== 'number') return String(eta);
+    const seconds = Math.max(0, Math.floor(eta));
+    if (seconds >= 3600) {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        return `${hours}小时${minutes}分钟`;
+    }
+    if (seconds >= 60) {
+        const minutes = Math.floor(seconds / 60);
+        const secs = seconds % 60;
+        return `${minutes}分${secs}秒`;
+    }
+    return `${seconds}秒`;
 }
 
 // Update cookies status display
