@@ -84,7 +84,9 @@ const elements = {
     wecomEncodingKey: document.getElementById('wecom-encoding-key'),
     wecomPublicUrl: document.getElementById('wecom-public-url'),
     wecomDefaultFormat: document.getElementById('wecom-default-format'),
-    wecomProxyDomain: document.getElementById('wecom-proxy-domain')
+    wecomProxyDomain: document.getElementById('wecom-proxy-domain'),
+    wecomNotifyAdmin: document.getElementById('wecom-notify-admin'),
+    wecomAdminUsers: document.getElementById('wecom-admin-users')
 };
 
 // Initialize
@@ -164,6 +166,12 @@ function initEventListeners() {
     elements.saveCookiesBtn.addEventListener('click', saveCookies);
     elements.saveSettingsBtn.addEventListener('click', saveSettings);
     elements.resetSettingsBtn.addEventListener('click', resetSettings);
+
+    // Admin notification test button
+    const testAdminNotifyBtn = document.getElementById('test-admin-notify-btn');
+    if (testAdminNotifyBtn) {
+        testAdminNotifyBtn.addEventListener('click', testAdminNotification);
+    }
 
     // yt-dlp update event listeners
     const checkUpdateBtn = document.getElementById('check-ytdlp-update-btn');
@@ -946,14 +954,17 @@ function displayHistory(history) {
     if (history.length === 0) {
         elements.historyList.classList.add('hidden');
         elements.noHistory.classList.remove('hidden');
+        document.getElementById('history-actions-bar').classList.add('hidden');
         return;
     }
 
     elements.historyList.classList.remove('hidden');
     elements.noHistory.classList.add('hidden');
+    document.getElementById('history-actions-bar').classList.remove('hidden');
 
     elements.historyList.innerHTML = history.map(item => `
         <div class="history-item" data-id="${item.id}">
+            <input type="checkbox" class="history-checkbox" data-item-id="${item.id}">
             <img src="${item.thumbnail ? `${API_BASE_URL}/api/proxy-thumbnail?url=${encodeURIComponent(item.thumbnail)}` : ''}" alt="${item.title}" class="history-thumbnail">
             <div class="history-details">
                 <div class="history-title">${item.title}</div>
@@ -1178,6 +1189,8 @@ async function updateCookiesStatus() {
         const cookiesResponse = await fetch(`${API_BASE_URL}/api/config/cookies`);
         if (cookiesResponse.ok) {
             const cookiesData = await cookiesResponse.json();
+            const cookieCountText = document.getElementById('cookie-count-text');
+
             if (cookiesData.content) {
                 // 分析cookies内容并显示状态
                 const lines = cookiesData.content.split('\n').filter(line =>
@@ -1185,34 +1198,75 @@ async function updateCookiesStatus() {
                 );
                 const cookiesCount = lines.length;
 
-                if (cookiesCount > 0) {
-                    elements.cookiesStatus.innerHTML = `
-                        <span class="status-indicator status-success">✅ 已加载 ${cookiesCount} 个cookies</span>
-                    `;
-                } else {
-                    elements.cookiesStatus.innerHTML = `
-                        <span class="status-indicator status-warning">⚠️ cookies文件为空或无效</span>
-                    `;
+                // 更新新位置的Cookie状态显示
+                if (cookieCountText) {
+                    if (cookiesCount > 0) {
+                        cookieCountText.textContent = `已加载 ${cookiesCount} 个cookies`;
+                        cookieCountText.style.color = '#10b981';
+                    } else {
+                        cookieCountText.textContent = 'cookies文件为空或无效';
+                        cookieCountText.style.color = '#fbbf24';
+                    }
+                }
+
+                // 保持原有的状态栏显示（如果存在）
+                if (elements.cookiesStatus) {
+                    if (cookiesCount > 0) {
+                        elements.cookiesStatus.innerHTML = `
+                            <span class="status-indicator status-success">✅ 已加载 ${cookiesCount} 个cookies</span>
+                        `;
+                    } else {
+                        elements.cookiesStatus.innerHTML = `
+                            <span class="status-indicator status-warning">⚠️ cookies文件为空或无效</span>
+                        `;
+                    }
                 }
 
                 // 同时更新输入框内容
                 elements.cookiesInput.value = cookiesData.content;
             } else {
-                elements.cookiesStatus.innerHTML = `
-                    <span class="status-indicator status-error">❌ 无cookies配置</span>
-                `;
+                // 更新新位置的Cookie状态显示
+                const cookieCountText = document.getElementById('cookie-count-text');
+                if (cookieCountText) {
+                    cookieCountText.textContent = '未配置cookies';
+                    cookieCountText.style.color = '#ef4444';
+                }
+
+                if (elements.cookiesStatus) {
+                    elements.cookiesStatus.innerHTML = `
+                        <span class="status-indicator status-error">❌ 无cookies配置</span>
+                    `;
+                }
                 elements.cookiesInput.value = '';
             }
         } else {
-            elements.cookiesStatus.innerHTML = `
-                <span class="status-indicator status-error">❌ 无cookies配置</span>
-            `;
+            // 更新新位置的Cookie状态显示
+            const cookieCountText = document.getElementById('cookie-count-text');
+            if (cookieCountText) {
+                cookieCountText.textContent = '未配置cookies';
+                cookieCountText.style.color = '#ef4444';
+            }
+
+            if (elements.cookiesStatus) {
+                elements.cookiesStatus.innerHTML = `
+                    <span class="status-indicator status-error">❌ 无cookies配置</span>
+                `;
+            }
         }
     } catch (error) {
         console.error('Error updating cookies status:', error);
-        elements.cookiesStatus.innerHTML = `
-            <span class="status-indicator status-error">❌ 获取cookies状态失败</span>
-        `;
+        // 更新新位置的Cookie状态显示
+        const cookieCountText = document.getElementById('cookie-count-text');
+        if (cookieCountText) {
+            cookieCountText.textContent = '获取cookie状态失败';
+            cookieCountText.style.color = '#ef4444';
+        }
+
+        if (elements.cookiesStatus) {
+            elements.cookiesStatus.innerHTML = `
+                <span class="status-indicator status-error">❌ 获取cookies状态失败</span>
+            `;
+        }
     }
 }
 
@@ -1269,6 +1323,8 @@ async function loadSettings() {
             elements.wecomPublicUrl.value = config.wecom.public_base_url || '';
             elements.wecomDefaultFormat.value = config.wecom.default_format_id || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
             elements.wecomProxyDomain.value = config.wecom.proxy_domain || '';
+            elements.wecomNotifyAdmin.checked = config.wecom.notify_admin || false;
+            elements.wecomAdminUsers.value = (config.wecom.admin_users || []).join(',');
         }
     } catch (error) {
         console.error('Error loading settings:', error);
@@ -1317,6 +1373,9 @@ async function saveSettings() {
     const publicUrl = elements.wecomPublicUrl.value.trim();
     const defaultFormat = elements.wecomDefaultFormat.value.trim() || 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best';
     const proxyDomain = elements.wecomProxyDomain.value.trim();
+    const notifyAdmin = elements.wecomNotifyAdmin.checked;
+    const adminUsersRaw = elements.wecomAdminUsers.value.trim();
+    const adminUsers = adminUsersRaw ? adminUsersRaw.split(',').map(u => u.trim()).filter(u => u) : [];
 
     if (encodingKey && encodingKey.length !== 43) {
         alert('EncodingAESKey 必须为43位');
@@ -1353,7 +1412,9 @@ async function saveSettings() {
             encoding_aes_key: encodingKey,
             public_base_url: publicUrl,
             default_format_id: defaultFormat,
-            proxy_domain: proxyDomain
+            proxy_domain: proxyDomain,
+            notify_admin: notifyAdmin,
+            admin_users: adminUsers
         }
     };
 
@@ -1833,6 +1894,8 @@ function initCookieCloud() {
                     const result = await response.json();
                     // Show the sync result message directly
                     showCookieCloudStatus(result.message, 'success');
+                    // Update cookies status immediately after sync
+                    await updateCookiesStatus();
                     // Don't reload status immediately as it will overwrite the sync message
                     // Refresh settings
                     await loadSettings();
@@ -1970,9 +2033,130 @@ function showCookieCloudStatus(message, type) {
 document.getElementById('cookiecloud-enabled')?.addEventListener('change', saveCookieCloudConfig);
 document.getElementById('cookiecloud-auto-sync')?.addEventListener('change', saveCookieCloudConfig);
 
+// Test admin notification
+async function testAdminNotification() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/wecom/test-admin`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            alert(result.message || '测试通知已发送给管理员');
+        } else {
+            const error = await response.json();
+            alert('发送测试通知失败: ' + (error.detail || '未知错误'));
+        }
+    } catch (error) {
+        console.error('Error testing admin notification:', error);
+        alert('测试通知失败: ' + error.message);
+    }
+}
+
+// Track if batch delete is already initialized
+let batchDeleteInitialized = false;
+
+// Batch delete functionality
+function setupBatchDelete() {
+    // Prevent multiple initializations
+    if (batchDeleteInitialized) {
+        return;
+    }
+    batchDeleteInitialized = true;
+
+    const selectAllCheckbox = document.getElementById('select-all-checkbox');
+    const batchDeleteBtn = document.getElementById('batch-delete-btn');
+    const selectedCount = document.getElementById('selected-count');
+
+    // Update selected count
+    function updateSelectedCount() {
+        const checkboxes = document.querySelectorAll('.history-checkbox:checked');
+        if (selectedCount) {
+            selectedCount.textContent = `已选择 ${checkboxes.length} 项`;
+        }
+        if (batchDeleteBtn) {
+            batchDeleteBtn.disabled = checkboxes.length === 0;
+        }
+    }
+
+    // Select all functionality - use event delegation
+    if (selectAllCheckbox) {
+        selectAllCheckbox.addEventListener('change', function() {
+            const checkboxes = document.querySelectorAll('.history-checkbox');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = selectAllCheckbox.checked;
+            });
+            updateSelectedCount();
+        });
+    }
+
+    // Individual checkbox change - use event delegation
+    document.addEventListener('change', function(e) {
+        if (e.target.classList.contains('history-checkbox')) {
+            const allCheckboxes = document.querySelectorAll('.history-checkbox');
+            const checkedCheckboxes = document.querySelectorAll('.history-checkbox:checked');
+            if (selectAllCheckbox) {
+                selectAllCheckbox.checked = allCheckboxes.length === checkedCheckboxes.length && allCheckboxes.length > 0;
+                selectAllCheckbox.indeterminate = checkedCheckboxes.length > 0 && checkedCheckboxes.length < allCheckboxes.length;
+            }
+            updateSelectedCount();
+        }
+    });
+
+    // Batch delete button
+    if (batchDeleteBtn) {
+        batchDeleteBtn.addEventListener('click', async function() {
+            const checkedItems = document.querySelectorAll('.history-checkbox:checked');
+            const itemIds = Array.from(checkedItems).map(checkbox => checkbox.dataset.itemId);
+
+            if (itemIds.length === 0) return;
+
+            if (!confirm(`确定要删除选中的 ${itemIds.length} 个项目吗？`)) {
+                return;
+            }
+
+            try {
+                batchDeleteBtn.disabled = true;
+                batchDeleteBtn.textContent = '删除中...';
+
+                // Delete items one by one (can be optimized with batch API later)
+                const promises = itemIds.map(id =>
+                    fetch(`${API_BASE_URL}/api/history/${id}`, {
+                        method: 'DELETE'
+                    })
+                );
+
+                await Promise.all(promises);
+
+                // Reset selection
+                if (selectAllCheckbox) {
+                    selectAllCheckbox.checked = false;
+                }
+                updateSelectedCount();
+
+                // Reload history
+                await loadHistory();
+
+                // Success message (optional, can be removed if you prefer no alert)
+                // alert(`成功删除 ${itemIds.length} 个项目`);
+            } catch (error) {
+                console.error('Batch delete error:', error);
+                alert('批量删除失败: ' + error.message);
+            } finally {
+                batchDeleteBtn.disabled = false;
+                batchDeleteBtn.textContent = '批量删除';
+            }
+        });
+    }
+}
+
 // Initialize CookieCloud when DOM is ready
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initCookieCloud);
+    document.addEventListener('DOMContentLoaded', () => {
+        initCookieCloud();
+        setupBatchDelete();
+    });
 } else {
     initCookieCloud();
+    setupBatchDelete();
 }

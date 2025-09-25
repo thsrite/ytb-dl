@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from ytb.config import Config
 from ytb.downloader import YTDownloader
 from ytb.history_manager import HistoryManager
+from wecom.message_templates import MessageTemplates
 
 from .client import WeComClient, WeComAPIError
 from .crypto import WeComCrypto, WeComCryptoError
@@ -143,11 +144,41 @@ class WeComService:
         if msg_id:
             self._mark_message_processed(msg_id)
 
+        # Generate task_id early so we can set up callbacks before download starts
+        import uuid
+        task_id = str(uuid.uuid4())
+
+        # Create task context early for 403 callback
+        self.task_context[task_id] = {
+            "touser": user_id,
+            "chatid": payload.get("ChatId"),
+            "agent_id": agent_id or self.wecom_config.get("agent_id"),
+            "title": "下载中...",  # Will be updated with actual title later
+            "url": url,
+        }
+
+        # Set up the notification callback for 403 errors BEFORE starting download
+        context = self.task_context[task_id]
+        async def notify_403_callback(task_id: str, url: str, status: str, retry_count: int = 0, final: bool = False, success: bool = False):
+            await self._handle_403_notification(task_id, url, status, retry_count, final, context, success)
+
+        # Register the callback for this specific task
+        self.downloader.set_403_notification_callback(task_id, notify_403_callback)
+
         try:
-            task_id = await self.downloader.download_video(url, format_id)
+            # Now start the download with pre-assigned task_id
+            actual_task_id = await self.downloader.download_video_with_id(url, task_id, format_id)
+            if actual_task_id != task_id:
+                logger.warning(f"Task ID mismatch: expected {task_id}, got {actual_task_id}")
+                # Update context if task_id changed
+                self.task_context[actual_task_id] = self.task_context.pop(task_id)
+                self.downloader.set_403_notification_callback(actual_task_id, notify_403_callback)
+                task_id = actual_task_id
         except Exception as exc:  # noqa: BLE001
             logger.exception("Failed to enqueue download for %s", url)
             await self._safe_notify(f"无法开始下载任务：{exc}", touser=user_id)
+            # Clean up task context if download failed to start
+            self.task_context.pop(task_id, None)
             return
 
         video_info: Dict[str, Any] = {}
@@ -300,24 +331,31 @@ class WeComService:
             video_info=video_info,  # 这里包含完整的视频信息
             url=url,
             touser=user_id,
-            status_text="已收到下载请求"
+            status_text="📥 开始下载"
         )
 
-        self.task_context[task_id] = {
-            "touser": user_id,
-            "chatid": payload.get("ChatId"),
-            "agent_id": agent_id or self.wecom_config.get("agent_id"),
+        # Update task context with actual video info
+        self.task_context[task_id].update({
             "title": history_entry["title"],
-            "url": url,
             "duration": video_info.get("duration"),  # 保存时长信息
             "uploader": video_info.get("uploader"),  # 保存作者信息
-        }
+        })
+
+        # Notify admins if enabled (but not if the user is an admin)
+        await self._notify_admins_if_needed(
+            user_id=user_id,
+            task_id=task_id,
+            title=history_entry['title'],
+            url=url,
+            source="WeChat"
+        )
 
         asyncio.create_task(self._monitor_task(task_id))
 
     async def _monitor_task(self, task_id: str) -> None:
         context = self.task_context.get(task_id, {})
         try:
+            # The 403 notification callback is already set up in handle_wecom_download
             while True:
                 await asyncio.sleep(5)
                 status = self.downloader.get_download_status(task_id)
@@ -348,6 +386,9 @@ class WeComService:
             title = context.get("title", "视频")
             public_url = self.wecom_config.get("public_base_url", "").rstrip("/")
             download_link = f"{public_url}/api/download-file/{task_id}" if public_url else None
+
+            # Debug logging
+            logger.info(f"Generating download link - public_url: {public_url}, download_link: {download_link}")
 
             # Get complete video info from history
             history_entry = self.history_manager.get_entry(task_id)
@@ -389,6 +430,16 @@ class WeComService:
                 status_text="✅ 下载完成",
                 download_link=download_link
             )
+
+            # Notify admins about download completion with download link
+            await self._notify_admins_download_complete(
+                user_id=context.get("touser"),
+                task_id=task_id,
+                title=title,
+                url=context.get("url", ""),
+                download_link=download_link,
+                file_size=video_info.get("filesize")
+            )
         else:
             update_payload["error_message"] = status.get("error", "未知错误")
             # For error, send text message
@@ -422,9 +473,16 @@ class WeComService:
             return
 
         try:
-            # 构建描述文本
-            description_parts = [f"📋 任务 ID: {task_id}", f"📊 状态: {status_text}"]
+            # 构建描述文本 - 统一格式
+            description_parts = []
 
+            # 状态行
+            description_parts.append(f"📊 状态: {status_text}")
+
+            # 任务信息
+            description_parts.append(f"🆔 任务ID: {task_id}")
+
+            # 视频信息
             if video_info.get("uploader"):
                 description_parts.append(f"👤 作者: {video_info['uploader']}")
 
@@ -455,7 +513,7 @@ class WeComService:
 
             # 如果有下载链接，添加到描述中
             if download_link:
-                description_parts.append(f"🔗 点击下载文件")
+                description_parts.append(f"\n💾 点击卡片下载文件")
 
             description = "\n".join(description_parts)
 
@@ -469,11 +527,15 @@ class WeComService:
                     encoded_thumbnail = urllib.parse.quote(video_info["thumbnail"], safe='')
                     picurl = f"{public_url}/api/proxy-thumbnail?url={encoded_thumbnail}"
 
+            # Debug logging for URL selection
+            final_url = download_link or url
+            logger.info(f"Sending video news - download_link: {download_link}, original_url: {url}, using: {final_url}")
+
             await self.client.send_news(
                 title=title or "YouTube 视频",
                 description=description,
                 picurl=picurl,
-                url=download_link or url,
+                url=final_url,
                 touser=touser
             )
         except Exception as exc:  # noqa: BLE001
@@ -539,4 +601,402 @@ class WeComService:
             self._recent_msg_index.discard(oldest)
         self._recent_msg_ids.append(msg_id)
         self._recent_msg_index.add(msg_id)
+
+    async def _notify_admins_if_needed(
+        self,
+        user_id: str,
+        task_id: str,
+        title: str,
+        url: str,
+        source: str = "WeChat",
+        video_info: Dict[str, Any] = None
+    ) -> None:
+        """Notify admin users about download tasks if configured"""
+        if not self.wecom_config.get("notify_admin", False):
+            return
+
+        admin_users = self.wecom_config.get("admin_users", [])
+        if not admin_users:
+            return
+
+        # Don't notify if the user is an admin themselves
+        if user_id in admin_users:
+            logger.info(f"Skipping admin notification - user {user_id} is an admin")
+            return
+
+        # Get unified admin notification template
+        notification = MessageTemplates.format_admin_notification(
+            task_id=task_id,
+            status='start',
+            user_id=user_id,
+            source=source,
+            url=url,
+            title=title
+        )
+
+        # Add video info if available
+        picurl = None
+        if video_info and video_info.get("thumbnail"):
+            public_url = self.wecom_config.get("public_base_url", "").rstrip("/")
+            if public_url:
+                import urllib.parse
+                encoded_thumbnail = urllib.parse.quote(video_info["thumbnail"], safe='')
+                picurl = f"{public_url}/api/proxy-thumbnail?url={encoded_thumbnail}"
+
+        for admin in admin_users:
+            try:
+                await self.client.send_news(
+                    title=notification['title'],
+                    description=notification['description'],
+                    picurl=picurl,
+                    url=url,
+                    touser=admin
+                )
+                logger.info(f"Admin notification sent to {admin} for task {task_id}")
+            except Exception as e:
+                logger.error(f"Failed to notify admin {admin}: {e}")
+
+    async def _notify_admins_download_complete(
+        self,
+        user_id: str,
+        task_id: str,
+        title: str,
+        url: str,
+        download_link: Optional[str],
+        file_size: Optional[int]
+    ) -> None:
+        """Notify admin users about completed downloads with download link"""
+        if not self.wecom_config.get("notify_admin", False):
+            return
+
+        admin_users = self.wecom_config.get("admin_users", [])
+        if not admin_users:
+            return
+
+        # Don't notify if the user is an admin themselves
+        if user_id in admin_users:
+            logger.info(f"Skipping admin completion notification - user {user_id} is an admin")
+            return
+
+        # Format file size
+        size_text = None
+        if file_size:
+            size_mb = file_size / (1024 * 1024)
+            if size_mb >= 1024:
+                size_text = f"{size_mb/1024:.1f} GB"
+            else:
+                size_text = f"{size_mb:.1f} MB"
+
+        # Get unified admin notification template
+        notification = MessageTemplates.format_admin_notification(
+            task_id=task_id,
+            status='complete',
+            user_id=user_id,
+            source='WeChat',
+            url=url,
+            title=title,
+            download_link=download_link,
+            file_size=size_text
+        )
+
+        # Send news message with download link to admins
+        for admin in admin_users:
+            try:
+                await self.client.send_news(
+                    title=notification['title'],
+                    description=notification['description'],
+                    url=notification['url'] or url,
+                    touser=admin
+                )
+                logger.info(f"Admin completion notification sent to {admin} for task {task_id}")
+            except Exception as e:
+                # Fallback to text message
+                try:
+                    admin_message = f"{notification['title']}\n\n{notification['description']}"
+                    await self._safe_notify(admin_message, touser=admin)
+                    logger.info(f"Admin completion text notification sent to {admin}")
+                except Exception as e2:
+                    logger.error(f"Failed to notify admin {admin}: {e2}")
+
+    async def _handle_403_notification(
+        self,
+        task_id: str,
+        url: str,
+        status: str,
+        retry_count: int,
+        final: bool,
+        context: Dict[str, Any],
+        success: bool = False
+    ) -> None:
+        """Handle 403 error and network error notifications to users and admins"""
+        user_id = context.get("touser")
+        title = context.get("title", "视频")
+        admin_users = self.wecom_config.get("admin_users", [])
+        is_admin = user_id in admin_users
+
+        # Check if this is a network error
+        is_network_error = "[网络错误]" in status
+
+        # If success after retry, send new download started message
+        if success:
+            # Get video info for the success message
+            video_info = {}
+            try:
+                # Try to get fresh video info
+                fresh_info = await self.downloader.get_video_info(url)
+                video_info = {
+                    'thumbnail': fresh_info.get('thumbnail'),
+                    'uploader': fresh_info.get('uploader'),
+                    'duration': fresh_info.get('duration'),
+                    'estimated_filesize': fresh_info.get('estimated_filesize')
+                }
+            except Exception:
+                # Use cached info from context
+                video_info = {
+                    'uploader': context.get('uploader'),
+                    'duration': context.get('duration')
+                }
+
+            # Send success notification with video card
+            if is_network_error:
+                status_text = "✅ 网络恢复，下载继续"
+            else:
+                status_text = "✅ Cookie 刷新成功，已重新开始下载"
+
+            await self._send_video_news(
+                task_id=task_id,
+                title=title,
+                video_info=video_info,
+                url=url,
+                touser=user_id,
+                status_text=status_text
+            )
+
+            # Notify admins about successful recovery (if user is not admin)
+            if self.wecom_config.get("notify_admin", False) and admin_users and not is_admin:
+                # Use unified template for recovery notification
+                if is_network_error:
+                    notification = MessageTemplates.format_admin_notification(
+                        task_id=task_id,
+                        status='complete',
+                        user_id=user_id,
+                        source='WeChat',
+                        url=url,
+                        title=title,
+                        error_msg='网络错误已恢复'
+                    )
+                else:
+                    notification = MessageTemplates.format_admin_notification(
+                        task_id=task_id,
+                        status='403_retry',
+                        user_id=user_id,
+                        source='WeChat',
+                        url=url,
+                        title=title,
+                        retry_count=retry_count
+                    )
+
+                for admin in admin_users:
+                    try:
+                        await self.client.send_news(
+                            title=notification['title'],
+                            description=notification['description'],
+                            url=notification['url'],
+                            touser=admin
+                        )
+                        logger.info(f"Recovery notification sent to admin {admin}")
+                    except Exception as e:
+                        logger.error(f"Failed to notify admin {admin} about recovery: {e}")
+            return
+
+        # Construct the error notification message
+        if final:
+            # Final failure notification
+            if is_network_error:
+                message = f"""❌ 下载失败 - 网络错误
+
+📹 视频: {title}
+🔗 链接: {url}
+📋 任务ID: {task_id}
+⚠️ 原因: 网络连接错误
+
+请检查:
+1. 网络连接是否正常
+2. 代理设置是否正确
+3. 稍后再试
+
+重试次数: {retry_count}/3"""
+            else:
+                message = f"""❌ 下载失败 - 403 禁止访问
+
+📹 视频: {title}
+🔗 链接: {url}
+📋 任务ID: {task_id}
+⚠️ 原因: 视频需要登录才能访问
+
+请检查:
+1. CookieCloud 是否已配置并同步
+2. 浏览器 Cookie 同步是否已开启
+3. 您的YouTube账号是否可以访问该视频
+
+重试次数: {retry_count}/3"""
+
+            # Send combined message if user is admin
+            if is_admin and self.wecom_config.get("notify_admin", False):
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                # Add admin info to the message
+                if is_network_error:
+                    message += f"""
+
+--- 管理员信息 ---
+📅 时间: {timestamp}
+👤 发起者: {user_id} (管理员)
+🔧 建议检查:
+- 网络连接状态
+- 代理配置
+- 服务器状态"""
+                else:
+                    message += f"""
+
+--- 管理员信息 ---
+📅 时间: {timestamp}
+👤 发起者: {user_id} (管理员)
+🔧 建议检查:
+- CookieCloud 配置是否正常
+- 浏览器 Cookie 提取是否可用
+- YouTube 账号状态"""
+
+                # Send only one message to admin user
+                await self._safe_notify(message, touser=user_id)
+
+                # Notify other admins if there are any
+                other_admins = [admin for admin in admin_users if admin != user_id]
+                if other_admins:
+                    if is_network_error:
+                        admin_message = f"""🚨 管理员通知 - 网络错误
+
+👤 用户: {user_id} (管理员)
+📹 视频: {title}
+🔗 链接: {url}
+📅 时间: {timestamp}
+🆔 任务ID: {task_id}
+❌ 失败原因: 网络连接错误
+
+建议检查:
+- 网络连接状态
+- 代理配置
+- 服务器状态"""
+                    else:
+                        admin_message = f"""🚨 管理员通知 - 403 错误
+
+👤 用户: {user_id} (管理员)
+📹 视频: {title}
+🔗 链接: {url}
+📅 时间: {timestamp}
+🆔 任务ID: {task_id}
+❌ 失败原因: 403 Forbidden (需要登录)
+
+建议检查:
+- CookieCloud 配置是否正常
+- 浏览器 Cookie 提取是否可用
+- YouTube 账号状态"""
+
+                    for admin in other_admins:
+                        try:
+                            await self._safe_notify(admin_message, touser=admin)
+                            logger.info(f"403 error notification sent to other admin {admin}")
+                        except Exception as e:
+                            logger.error(f"Failed to notify admin {admin}: {e}")
+            else:
+                # User is not admin, send normal message
+                await self._safe_notify(message, touser=user_id)
+
+                # Notify all admins
+                if self.wecom_config.get("notify_admin", False) and admin_users:
+                    # Use unified template for admin notification
+                    if is_network_error:
+                        error_status = 'error'
+                        error_detail = f'网络连接错误 (重试{retry_count}次失败)'
+                    else:
+                        error_status = '403_error'
+                        error_detail = '403 Forbidden (需要登录)'
+
+                    notification = MessageTemplates.format_admin_notification(
+                        task_id=task_id,
+                        status=error_status,
+                        user_id=user_id,
+                        source='WeChat',
+                        url=url,
+                        title=title,
+                        error_msg=error_detail,
+                        retry_count=retry_count
+                    )
+
+                    for admin in admin_users:
+                        try:
+                            await self.client.send_news(
+                                title=notification['title'],
+                                description=notification['description'],
+                                url=notification['url'],
+                                touser=admin
+                            )
+                            logger.info(f"403 error notification sent to admin {admin}")
+                        except Exception as e:
+                            # Fallback to text message
+                            try:
+                                admin_message = f"{notification['title']}\n\n{notification['description']}"
+                                await self._safe_notify(admin_message, touser=admin)
+                            except Exception as e2:
+                                logger.error(f"Failed to notify admin {admin}: {e2}")
+        else:
+            # Progress notification during retry - only send to user
+            if is_network_error:
+                clean_status = status.replace("[网络错误] ", "")
+                message = f"🔄 网络错误处理中\n\n📹 视频: {title}\n📋 任务ID: {task_id}\n🔧 状态: {clean_status}\n🔁 重试: {retry_count}/3"
+            else:
+                message = MessageTemplates.format_user_notification(
+                    status='403_retry',
+                    title=title,
+                    retry_info=f"重试 {retry_count}/3\n正在尝试刷新 Cookie..."
+                )
+
+            await self._safe_notify(message, touser=user_id)
+
+    async def send_admin_test(self) -> bool:
+        """Send a test notification to all admin users"""
+        if not self.client:
+            logger.warning("Cannot send admin test: client not configured")
+            logger.warning(f"Current config: corp_id={self.wecom_config.get('corp_id')}, agent_id={self.wecom_config.get('agent_id')}, has_secret={bool(self.wecom_config.get('app_secret'))}")
+            return False
+
+        admin_users = self.wecom_config.get("admin_users", [])
+        if not admin_users:
+            logger.info("No admin users configured")
+            return False
+
+        logger.info(f"Attempting to send test notification to admins: {admin_users}")
+
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        test_message = f"""🧪 管理员通知测试
+
+✅ 您已成功配置为管理员
+📅 测试时间: {timestamp}
+🔔 当有新的下载任务时，您将收到通知
+
+提示：您自己发起的下载不会重复通知"""
+
+        success_count = 0
+        for admin in admin_users:
+            try:
+                await self._safe_notify(test_message, touser=admin)
+                logger.info(f"Test notification sent to admin {admin}")
+                success_count += 1
+            except Exception as e:
+                logger.error(f"Failed to send test to admin {admin}: {e}")
+
+        return success_count > 0
 

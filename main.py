@@ -17,6 +17,7 @@ from ytb.history_manager import HistoryManager
 from ytb.updater import YtDlpUpdater
 from ytb.browser_cookies import BrowserCookieExtractor
 from wecom import WeComService
+from wecom.message_templates import MessageTemplates
 from version import __version__
 
 app = FastAPI(title="YouTube Video Downloader API")
@@ -92,7 +93,99 @@ async def get_video_info(request: VideoInfoRequest):
 async def start_download(request: DownloadRequest):
     """开始下载视频"""
     try:
-        task_id = await downloader.download_video(request.url, request.format_id)
+        # Generate task_id early
+        import uuid
+        task_id = str(uuid.uuid4())
+
+        # Set up 403/network error notification callback for Web downloads
+        async def web_error_callback(task_id: str, url: str, status: str, retry_count: int = 0, final: bool = False, success: bool = False):
+            """Handle 403 and network error notifications for Web downloads"""
+            # Get title from history or use a default
+            entry = history_manager.get_entry(task_id)
+            title = entry.get("title", "Unknown") if entry else "Unknown"
+
+            # Determine error type
+            is_network_error = "[网络错误]" in status
+
+            if success:
+                # Recovery notification
+                if is_network_error:
+                    error_msg = "网络错误已恢复"
+                else:
+                    error_msg = "Cookie刷新成功，下载已恢复"
+
+                await notify_wecom_admins(
+                    task_id=task_id,
+                    title=title,
+                    url=url,
+                    source="Web",
+                    status="started",
+                    error_message=error_msg
+                )
+            elif final:
+                # Final failure notification
+                if is_network_error:
+                    error_msg = f"网络连接错误（重试{retry_count}次失败）"
+                else:
+                    error_msg = f"403 Forbidden - 需要登录（重试{retry_count}次失败）"
+
+                await notify_wecom_admins(
+                    task_id=task_id,
+                    title=title,
+                    url=url,
+                    source="Web",
+                    status="error",
+                    error_message=error_msg
+                )
+            else:
+                # Progress notification - use a specific status to indicate retry
+                clean_status = status.replace("[网络错误] ", "")
+
+                # Create a notification using the template
+                if is_network_error:
+                    notification = MessageTemplates.format_admin_notification(
+                        task_id=task_id,
+                        status='network_retry',
+                        user_id="Web User",
+                        source="Web",
+                        url=url,
+                        title=title,
+                        error_msg=f"网络错误: {clean_status}",
+                        retry_count=retry_count
+                    )
+                else:
+                    notification = MessageTemplates.format_admin_notification(
+                        task_id=task_id,
+                        status='403_retry',
+                        user_id="Web User",
+                        source="Web",
+                        url=url,
+                        title=title,
+                        error_msg=clean_status,
+                        retry_count=retry_count
+                    )
+
+                # Send notification to admins
+                wecom_config = config.get_wecom_config()
+                if wecom_config.get("notify_admin", False) and wecom_service and wecom_service.client:
+                    admin_users = wecom_config.get("admin_users", [])
+                    for admin in admin_users:
+                        try:
+                            await wecom_service.client.send_news(
+                                title=notification['title'],
+                                description=notification['description'],
+                                url=notification['url'] or url,
+                                touser=admin
+                            )
+                            logger.info(f"403/network retry notification sent to admin {admin}")
+                        except Exception as e:
+                            logger.error(f"Failed to notify admin {admin}: {e}")
+
+        # Register the callback
+        downloader.set_403_notification_callback(task_id, web_error_callback)
+
+        # Start download with pre-assigned task_id
+        actual_task_id = await downloader.download_video_with_id(request.url, task_id, request.format_id)
 
         # Get video info for history
         info = await downloader.get_video_info(request.url)
@@ -110,6 +203,38 @@ async def start_download(request: DownloadRequest):
             "file_size": None
         }
         history_manager.add_entry(history_entry)
+
+        # Estimate file size like in WeComService
+        estimated_size = None
+        if info.get('formats'):
+            # Try to get file size from formats
+            for fmt in info['formats']:
+                if fmt.get('filesize') or fmt.get('filesize_approx'):
+                    size = fmt.get('filesize') or fmt.get('filesize_approx')
+                    if not estimated_size or size > estimated_size:
+                        estimated_size = size
+
+        if estimated_size:
+            info['estimated_filesize'] = estimated_size
+
+        # Notify admins if enabled (Web downloads)
+        await notify_wecom_admins(
+            task_id=task_id,
+            title=info.get("title", "Unknown"),
+            url=request.url,
+            source="Web",
+            video_info=info,
+            status="started"
+        )
+
+        # Start monitoring task for completion
+        import asyncio
+        asyncio.create_task(monitor_web_download(
+            task_id=task_id,
+            title=info.get("title", "Unknown"),
+            url=request.url,
+            video_info=info
+        ))
 
         return {"task_id": task_id, "message": "Download started"}
     except Exception as e:
@@ -532,6 +657,189 @@ async def update_wecom_config(updates: dict):
 
     wecom_service.reload_config()
     return {"message": "WeCom config updated"}
+
+
+async def monitor_web_download(task_id: str, title: str, url: str, video_info: dict) -> None:
+    """Monitor Web download task and send completion/error notifications"""
+    import asyncio
+
+    try:
+        while True:
+            await asyncio.sleep(5)
+            status = downloader.get_download_status(task_id)
+
+            if not status:
+                continue
+
+            current = status.get("status")
+
+            if current == "completed":
+                # Get actual file size if available
+                filepath = status.get("filepath")
+                if filepath and os.path.exists(filepath):
+                    try:
+                        actual_size = os.path.getsize(filepath)
+                        video_info['filesize'] = actual_size
+                    except:
+                        pass
+
+                # Update history
+                history_manager.update_entry(task_id, {
+                    "status": "completed",
+                    "file_path": filepath,
+                    "file_size": video_info.get('filesize')
+                })
+
+                # Generate download link for admins
+                wecom_config = config.get_wecom_config()
+                public_url = wecom_config.get("public_base_url", "").rstrip("/")
+                download_link = f"{public_url}/api/download-file/{task_id}" if public_url else None
+
+                # Notify admins of completion with download link
+                await notify_wecom_admins(
+                    task_id=task_id,
+                    title=title,
+                    url=url,
+                    source="Web",
+                    video_info=video_info,
+                    status="completed",
+                    download_link=download_link
+                )
+                break
+
+            elif current == "error":
+                error_msg = status.get("error", "未知错误")
+
+                # Update history
+                history_manager.update_entry(task_id, {
+                    "status": "error",
+                    "error_message": error_msg
+                })
+
+                # Notify admins of error
+                await notify_wecom_admins(
+                    task_id=task_id,
+                    title=title,
+                    url=url,
+                    source="Web",
+                    video_info=video_info,
+                    status="error",
+                    error_message=error_msg
+                )
+                break
+
+    except Exception as e:
+        logger.error(f"Error monitoring web download {task_id}: {e}")
+    finally:
+        # Clean up task
+        downloader.cleanup_task(task_id)
+
+
+async def notify_wecom_admins(
+    task_id: str,
+    title: str,
+    url: str,
+    source: str = "Web",
+    video_info: dict = None,
+    status: str = "started",
+    error_message: str = None,
+    download_link: str = None
+) -> None:
+    """Notify admin users about download tasks from Web interface"""
+    wecom_config = config.get_wecom_config()
+
+    if not wecom_config.get("notify_admin", False):
+        return
+
+    admin_users = wecom_config.get("admin_users", [])
+    if not admin_users:
+        return
+
+    # Map status to our unified template format
+    template_status = 'start'
+    if status == "completed":
+        template_status = 'complete'
+    elif status == "error":
+        template_status = 'error'
+
+    # Format file size if available
+    file_size_text = None
+    if video_info:
+        file_size = (video_info.get("filesize") or
+                    video_info.get("filesize_approx") or
+                    video_info.get("estimated_filesize"))
+
+        if isinstance(file_size, (int, float)) and file_size > 0:
+            size_mb = file_size / (1024 * 1024)
+            if size_mb >= 1024:
+                file_size_text = f"{size_mb/1024:.1f} GB"
+            else:
+                file_size_text = f"{size_mb:.1f} MB"
+
+            if video_info.get("estimated_filesize") and not video_info.get("filesize"):
+                file_size_text += " (预估)"
+
+    # Get unified admin notification template
+    notification = MessageTemplates.format_admin_notification(
+        task_id=task_id,
+        status=template_status,
+        user_id="Web User",  # Web downloads don't have specific user
+        source=source,
+        url=url,
+        title=title,
+        download_link=download_link,
+        error_msg=error_message,
+        file_size=file_size_text
+    )
+
+    # Get proxy thumbnail URL if available
+    picurl = None
+    if video_info and video_info.get("thumbnail"):
+        public_url = wecom_config.get("public_base_url", "").rstrip("/")
+        if public_url:
+            import urllib.parse
+            encoded_thumbnail = urllib.parse.quote(video_info["thumbnail"], safe='')
+            picurl = f"{public_url}/api/proxy-thumbnail?url={encoded_thumbnail}"
+
+    # Send notification to all admins using news format
+    if wecom_service and wecom_service.client:
+        for admin in admin_users:
+            try:
+                # Use news format for better presentation
+                await wecom_service.client.send_news(
+                    title=notification['title'],
+                    description=notification['description'],
+                    picurl=picurl,
+                    url=notification['url'] or url,
+                    touser=admin
+                )
+                logger.info(f"Admin notification sent to {admin} for task {task_id} (status: {status})")
+            except Exception as e:
+                logger.error(f"Failed to notify admin {admin}: {e}")
+
+
+@app.post("/api/wecom/test-admin")
+async def test_admin_notification():
+    """Test admin notification"""
+    if not wecom_service:
+        raise HTTPException(status_code=503, detail="WeChat Work service is not configured")
+
+    # Reload config to get latest admin settings
+    wecom_service.reload_config()
+
+    success = await wecom_service.send_admin_test()
+
+    if success:
+        admin_users = config.get_wecom_config().get("admin_users", [])
+        return {"success": True, "message": f"测试通知已发送给 {len(admin_users)} 个管理员"}
+    else:
+        admin_users = config.get_wecom_config().get("admin_users", [])
+        if not admin_users:
+            return {"success": False, "message": "请先配置管理员用户ID"}
+        elif not wecom_service.client:
+            return {"success": False, "message": "企业微信客户端未正确配置，请检查CorpID、AgentID和App Secret"}
+        else:
+            return {"success": False, "message": "发送测试通知失败，请检查配置"}
 
 
 @app.get("/api/wecom/callback")

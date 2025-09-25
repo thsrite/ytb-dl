@@ -2,6 +2,7 @@ import os
 import json
 import base64
 import hashlib
+import re
 import requests
 from hashlib import md5
 from typing import Dict, List, Optional, Tuple
@@ -191,7 +192,7 @@ class CookieCloud:
                     if isinstance(cookies_list, list):
                         domain_cookies.extend(cookies_list)
                 # Also check for YouTube-specific domains
-                elif domain == 'youtube.com' and ('youtube' in sync_domain.lower() or 'google' in sync_domain.lower()):
+                elif domain == 'youtube.com' and 'youtube' in sync_domain.lower():
                     if isinstance(cookies_list, list):
                         domain_cookies.extend(cookies_list)
 
@@ -218,6 +219,9 @@ class CookieCloud:
             # Ensure output directory exists
             os.makedirs(os.path.dirname(output_file) or '.', exist_ok=True)
 
+            # Count valid cookies
+            valid_cookies = 0
+
             with open(output_file, 'w') as f:
                 # Write Netscape cookie file header
                 f.write("# Netscape HTTP Cookie File\n")
@@ -227,6 +231,13 @@ class CookieCloud:
                 # Write each cookie in Netscape format
                 for cookie in cookies:
                     domain_str = cookie.get('domain', '')
+
+                    # Filter for YouTube and Google domains primarily
+                    if domain == 'youtube.com':
+                        # Only include cookies from YouTube and Google domains
+                        if not any(d in domain_str.lower() for d in ['youtube', 'google', 'ytimg', 'googlevideo']):
+                            continue
+
                     if domain_str.startswith('.'):
                         include_subdomains = 'TRUE'
                     else:
@@ -239,11 +250,32 @@ class CookieCloud:
                     name = cookie.get('name', '')
                     value = cookie.get('value', '')
 
+                    # Clean up the cookie value - remove/escape problematic characters
+                    # Remove all control characters including newlines, tabs, etc
+                    value = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', value)
+                    # Also remove literal \t \n \r sequences
+                    value = value.replace('\\t', '').replace('\\n', '').replace('\\r', '')
+
+                    # Skip cookies with empty names or values after cleaning
+                    if not name or not value:
+                        continue
+
+                    # Skip cookies with values that are too long (likely corrupted)
+                    if len(value) > 4096:
+                        print(f"Skipping cookie {name} with excessive value length: {len(value)}")
+                        continue
+
+                    # Also clean other fields to be safe
+                    domain_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', domain_str)
+                    path = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', path)
+                    name = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', name)
+
                     # Format: domain include_subdomains path secure expires name value
                     line = f"{domain_str}\t{include_subdomains}\t{path}\t{secure}\t{expires}\t{name}\t{value}\n"
                     f.write(line)
+                    valid_cookies += 1
 
-            print(f"Successfully saved {len(cookies)} cookies to {output_file}")
+            print(f"Successfully saved {valid_cookies} valid cookies (out of {len(cookies)} total) to {output_file}")
             return True
 
         except Exception as e:

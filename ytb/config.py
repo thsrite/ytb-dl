@@ -9,10 +9,14 @@ class Config:
             # Check if running in Docker container
             if os.path.exists("/app"):
                 config_file = "/app/config/config.json"
+                self.config_dir = "/app/config"
             else:
                 # Default path relative to the project root
                 base_dir = os.path.dirname(os.path.dirname(__file__))  # Go up two levels from ytb/config.py
                 config_file = os.path.join(base_dir, "config", "config.json")
+                self.config_dir = os.path.join(base_dir, "config")
+        else:
+            self.config_dir = os.path.dirname(config_file)
         self.config_file = config_file
         self.default_config = {
             "cookies_file": None,
@@ -51,7 +55,9 @@ class Config:
                 "encoding_aes_key": "",
                 "public_base_url": "",
                 "default_format_id": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
-                "proxy_domain": ""
+                "proxy_domain": "",
+                "admin_users": [],
+                "notify_admin": False
             }
         }
         self.config = self.load_config()

@@ -25,6 +25,8 @@ class YTDownloader:
         self.cookie_extractor = BrowserCookieExtractor()
         # Track 403 errors for automatic retry
         self.error_counts: Dict[str, int] = {}
+        # Store 403 notification callbacks per task
+        self.notification_callbacks: Dict[str, Any] = {}
 
     def _progress_hook(self, task_id: str):
         def hook(d):
@@ -201,8 +203,12 @@ class YTDownloader:
             'url': url
         }
 
-    async def download_video(self, url: str, format_id: Optional[str] = None) -> str:
-        task_id = str(uuid.uuid4())
+    def set_403_notification_callback(self, task_id: str, callback) -> None:
+        """Set a 403 notification callback for a specific task"""
+        self.notification_callbacks[task_id] = callback
+
+    async def download_video_with_id(self, url: str, task_id: str, format_id: Optional[str] = None) -> str:
+        """Download video with pre-assigned task_id (for 403 callback setup)"""
 
         # Initialize download tracking
         self.active_downloads[task_id] = {
@@ -230,11 +236,22 @@ class YTDownloader:
         format_str = format_id or default_format
         output_template = os.path.join(self.download_dir, '%(title)s.%(ext)s')
 
-        ydl_opts = self.config.get_ydl_opts({
+        # Get base options from config
+        base_opts = {
             'format': format_str,
             'outtmpl': output_template,
             'progress_hooks': [self._progress_hook(task_id)],
-        })
+        }
+
+        # Get options with cookies included
+        ydl_opts = self.config.get_ydl_opts(base_opts)
+
+        # Add cookies support
+        ydl_opts = self.get_ydl_opts_with_browser_cookies(ydl_opts)
+
+        # Add age limit bypass for age-restricted videos
+        ydl_opts['age_limit'] = None  # No age limit
+        ydl_opts['skip_download'] = False
 
         # Build and log the equivalent yt-dlp command
         command_parts = ['yt-dlp']
@@ -298,8 +315,6 @@ class YTDownloader:
         print(f"yt-dlp command: {command_str}")
         print(f"{'='*60}\n")
 
-        loop = asyncio.get_event_loop()
-
         def download():
             try:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -319,19 +334,47 @@ class YTDownloader:
                 error_msg = str(e)
                 print(f"Download error: {error_msg}")
 
-                # Handle 403 Forbidden error
-                if "403" in error_msg or "Forbidden" in error_msg:
-                    print(f"Detected 403 error for task {task_id}, attempting cookie refresh...")
-                    loop = asyncio.get_event_loop()
-                    retry_success = loop.run_until_complete(self.handle_403_error(task_id, url, format_id))
+                # Handle network connection errors
+                if any(err in error_msg.lower() for err in ['connection reset', 'connection aborted', 'network', 'timeout', 'ssl']):
+                    print(f"Detected network error for task {task_id}, will retry...")
+                    logger.info(f"Network error for task {task_id}: {error_msg}")
 
-                    if retry_success:
-                        # Retry with fresh cookies
-                        fresh_opts = self.get_ydl_opts_with_browser_cookies(ydl_opts)
+                    # Increment network error count
+                    if task_id not in self.error_counts:
+                        self.error_counts[task_id] = 0
+                    self.error_counts[task_id] += 1
+
+                    # Max 3 retries for network errors
+                    if self.error_counts[task_id] <= 3:
+                        # Send notification about network error retry
+                        import asyncio
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
                         try:
-                            with yt_dlp.YoutubeDL(fresh_opts) as ydl:
+                            new_loop.run_until_complete(
+                                self.notify_network_error(task_id, url, f"网络连接错误，正在第{self.error_counts[task_id]}次重试...",
+                                                        retry_count=self.error_counts[task_id])
+                            )
+                        finally:
+                            new_loop.close()
+
+                        # Wait a bit before retry
+                        import time
+                        wait_time = min(10 * self.error_counts[task_id], 30)  # Exponential backoff, max 30 seconds
+                        print(f"Waiting {wait_time} seconds before retry...")
+                        time.sleep(wait_time)
+
+                        # Update task status
+                        self.active_downloads[task_id]['status'] = 'retrying'
+                        self.active_downloads[task_id]['error'] = f'网络错误，第{self.error_counts[task_id]}次重试中...'
+
+                        try:
+                            print(f"Retrying download after network error for: {url}")
+                            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                                 info = ydl.extract_info(url, download=True)
                                 filename = ydl.prepare_filename(info)
+                                print(f"Retry download completed successfully for task {task_id}")
+                                logger.info(f"Network retry successful for task {task_id}, file: {filename}")
 
                                 if not filename.endswith('.mp4'):
                                     base_name = os.path.splitext(filename)[0]
@@ -341,10 +384,150 @@ class YTDownloader:
                                 self.active_downloads[task_id]['status'] = 'completed'
                                 self.active_downloads[task_id]['filename'] = os.path.basename(filename)
                                 self.active_downloads[task_id]['filepath'] = os.path.abspath(filename)
+                                print(f"✅ Task {task_id} completed after network error retry")
+
+                                # Send success notification
+                                new_loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(new_loop)
+                                try:
+                                    new_loop.run_until_complete(
+                                        self.notify_network_error(task_id, url, "网络恢复，下载成功",
+                                                                retry_count=self.error_counts[task_id],
+                                                                success=True)
+                                    )
+                                finally:
+                                    new_loop.close()
+
                                 return task_id
                         except Exception as retry_error:
-                            print(f"Retry failed: {retry_error}")
+                            print(f"Network retry {self.error_counts[task_id]} failed: {retry_error}")
+                            logger.error(f"Network retry {self.error_counts[task_id]} failed for task {task_id}: {retry_error}")
                             error_msg = str(retry_error)
+                            # Continue to next retry or error handling
+                    else:
+                        # Max retries exceeded for network error
+                        print(f"Max network retries exceeded for task {task_id}")
+                        logger.error(f"Max network retries exceeded for task {task_id}")
+
+                        # Send final failure notification
+                        import asyncio
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            new_loop.run_until_complete(
+                                self.notify_network_error(task_id, url, "网络错误，多次重试失败",
+                                                        retry_count=self.error_counts[task_id],
+                                                        final=True)
+                            )
+                        finally:
+                            new_loop.close()
+
+                        self.active_downloads[task_id]['status'] = 'error'
+                        self.active_downloads[task_id]['error'] = f'网络错误: {error_msg[:200]}'
+                        raise e
+
+                # Handle 403 Forbidden error
+                elif "403" in error_msg or "Forbidden" in error_msg:
+                    print(f"Detected 403 error for task {task_id}, attempting cookie refresh...")
+                    # Create a new event loop for this thread since we're in an executor
+                    import asyncio
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        retry_success = new_loop.run_until_complete(self.handle_403_error(task_id, url, format_id))
+                    finally:
+                        new_loop.close()
+
+                    if retry_success:
+                        # Retry with fresh cookies
+                        print(f"Cookie refresh successful for task {task_id}, retrying download...")
+                        logger.info(f"Starting retry download for task {task_id} after cookie refresh")
+
+                        # Update task status to show retry in progress
+                        self.active_downloads[task_id]['status'] = 'downloading'
+                        self.active_downloads[task_id]['error'] = None
+
+                        # Get fresh options with updated cookies
+                        fresh_opts = ydl_opts.copy()
+                        # Add the cookie file path directly
+                        cookiecloud_file = os.path.join(self.config.config_dir, 'cookies.txt')
+                        if os.path.exists(cookiecloud_file):
+                            fresh_opts['cookiefile'] = cookiecloud_file
+                            print(f"Using CookieCloud cookies from: {cookiecloud_file}")
+                            logger.info(f"Cookie file exists at {cookiecloud_file}, size: {os.path.getsize(cookiecloud_file)} bytes")
+                        else:
+                            # Fallback to browser cookies
+                            fresh_opts = self.get_ydl_opts_with_browser_cookies(ydl_opts)
+
+                        # Add more options for retry to handle age-restricted content
+                        fresh_opts['age_limit'] = None  # No age limit
+                        fresh_opts['geo_bypass'] = True  # Bypass geographic restrictions
+                        fresh_opts['geo_bypass_country'] = 'US'  # Try US region
+
+                        # Check if we have cookie file from CookieCloud or browser
+                        cookie_file = fresh_opts.get('cookiefile')
+                        if cookie_file and os.path.exists(cookie_file):
+                            print(f"Using cookie file: {cookie_file}")
+                            logger.info(f"Cookie file exists at {cookie_file}, size: {os.path.getsize(cookie_file)} bytes")
+
+                        # Send success notification BEFORE starting retry
+                        import asyncio
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            new_loop.run_until_complete(
+                                self.notify_403_error(task_id, url, "",
+                                                    retry_count=self.error_counts[task_id],
+                                                    final=False, success=True)
+                            )
+                        finally:
+                            new_loop.close()
+
+                        try:
+                            print(f"Retrying download with refreshed cookies for: {url}")
+                            with yt_dlp.YoutubeDL(fresh_opts) as ydl:
+                                info = ydl.extract_info(url, download=True)
+                                filename = ydl.prepare_filename(info)
+                                print(f"Retry download completed successfully for task {task_id}")
+                                logger.info(f"Retry successful for task {task_id}, file: {filename}")
+
+                                if not filename.endswith('.mp4'):
+                                    base_name = os.path.splitext(filename)[0]
+                                    if os.path.exists(f"{base_name}.mp4"):
+                                        filename = f"{base_name}.mp4"
+
+                                self.active_downloads[task_id]['status'] = 'completed'
+                                self.active_downloads[task_id]['filename'] = os.path.basename(filename)
+                                self.active_downloads[task_id]['filepath'] = os.path.abspath(filename)
+                                print(f"✅ Task {task_id} completed after cookie refresh retry")
+
+                                return task_id
+                        except Exception as retry_error:
+                            print(f"Retry failed after cookie refresh: {retry_error}")
+                            logger.error(f"Retry failed for task {task_id}: {retry_error}")
+                            error_msg = str(retry_error)
+
+                            # If still 403 after cookie refresh, it might be age-restricted or region-blocked
+                            if "403" in str(retry_error) or "Forbidden" in str(retry_error):
+                                # Send final failure notification
+                                import asyncio
+                                new_loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(new_loop)
+                                try:
+                                    new_loop.run_until_complete(
+                                        self.notify_403_error(task_id, url, "Cookie刷新后仍然失败，视频可能需要年龄验证或地区限制",
+                                                            retry_count=self.error_counts[task_id],
+                                                            final=True)
+                                    )
+                                finally:
+                                    new_loop.close()
+
+                                # Set final error message
+                                self.active_downloads[task_id]['status'] = 'error'
+                                self.active_downloads[task_id]['error'] = 'Cookie刷新后仍然403错误，视频可能有特殊限制'
+                    else:
+                        print(f"Cookie refresh failed for task {task_id}, unable to retry")
+                        logger.error(f"Cookie refresh failed for task {task_id}")
 
                 # Try multiple fallback strategies if format error
                 elif "Requested format is not available" in error_msg:
@@ -396,6 +579,7 @@ class YTDownloader:
                 raise e
 
         # Start download in background
+        loop = asyncio.get_event_loop()
         loop.run_in_executor(self.executor, download)
 
         return task_id
@@ -410,10 +594,20 @@ class YTDownloader:
             del self.download_phases[task_id]
         if task_id in self.error_counts:
             del self.error_counts[task_id]
+        if task_id in self.notification_callbacks:
+            del self.notification_callbacks[task_id]
 
     def get_ydl_opts_with_browser_cookies(self, base_opts: Dict[str, Any] = None) -> Dict[str, Any]:
         """Get yt-dlp options with browser cookies if enabled"""
-        opts = base_opts or {}
+        opts = base_opts.copy() if base_opts else {}
+
+        # First check for CookieCloud cookies file
+        cookiecloud_file = os.path.join(self.config.config_dir, 'cookies.txt')
+        if os.path.exists(cookiecloud_file):
+            opts['cookiefile'] = cookiecloud_file
+            logger.info(f"Using CookieCloud cookie file: {cookiecloud_file}")
+            print(f"Using CookieCloud cookies from {cookiecloud_file}")
+            return opts
 
         # Check if browser cookies are enabled in config
         browser_config = self.config.config.get('browser_cookies', {})
@@ -432,10 +626,33 @@ class YTDownloader:
                     opts['user_agent'] = cookie_data['user_agent']
 
                 logger.info(f"Using browser cookies from {browser}")
+                print(f"Using browser cookies from {browser}")
             else:
                 logger.warning("Failed to extract browser cookies, using fallback")
 
         return opts
+
+    async def download_video(self, url: str, format_id: Optional[str] = None) -> str:
+        """Original download_video method for backward compatibility"""
+        task_id = str(uuid.uuid4())
+        return await self.download_video_with_id(url, task_id, format_id)
+
+    async def notify_403_error(self, task_id: str, url: str, status: str, retry_count: int = 0, final: bool = False, success: bool = False) -> None:
+        """Send notifications for 403 errors to admins and users via WeChat"""
+        # Check if there's a task-specific callback registered
+        callback = self.notification_callbacks.get(task_id)
+        if callback:
+            await callback(task_id, url, status, retry_count, final, success)
+        # Otherwise, no notification (for non-WeChat downloads)
+
+    async def notify_network_error(self, task_id: str, url: str, status: str, retry_count: int = 0, final: bool = False, success: bool = False) -> None:
+        """Send notifications for network errors to admins and users via WeChat"""
+        # Check if there's a task-specific callback registered
+        callback = self.notification_callbacks.get(task_id)
+        if callback:
+            # Call the same callback but with network-specific status
+            await callback(task_id, url, f"[网络错误] {status}", retry_count, final, success)
+        # Otherwise, no notification (for non-WeChat downloads)
 
     async def handle_403_error(self, task_id: str, url: str, format_id: Optional[str] = None) -> bool:
         """Handle 403 error by refreshing cookies and retrying"""
@@ -447,22 +664,58 @@ class YTDownloader:
         # Max 3 retries
         if self.error_counts[task_id] > 3:
             logger.error(f"Max retries exceeded for task {task_id}")
+            # Send final failure notification
+            await self.notify_403_error(task_id, url, "Max retries exceeded", final=True)
             return False
 
-        # Try to refresh cookies
+        # First, check if CookieCloud is enabled and try to sync
+        cookiecloud_config = self.config.config.get('cookiecloud', {})
+        if cookiecloud_config.get('enabled'):
+            logger.info(f"Attempting CookieCloud sync for task {task_id}...")
+            print(f"🔄 Syncing cookies from CookieCloud for task {task_id}...")
+
+            # Notify about cookie sync attempt
+            await self.notify_403_error(task_id, url, "正在从 CookieCloud 同步 Cookie...", retry_count=self.error_counts[task_id])
+
+            from .cookiecloud import CookieCloud
+            cc = CookieCloud(cookiecloud_config)
+            success, message = cc.sync_cookies()
+
+            if success:
+                logger.info(f"CookieCloud sync successful: {message}")
+                print(f"✅ CookieCloud sync successful: {message}")
+                self.active_downloads[task_id]['status'] = 'retrying'
+                self.active_downloads[task_id]['error'] = 'CookieCloud cookies 已同步，正在重试...'
+
+                await asyncio.sleep(2)
+                return True
+            else:
+                logger.warning(f"CookieCloud sync failed: {message}")
+                print(f"⚠️ CookieCloud sync failed: {message}")
+
+        # Try to refresh browser cookies
         browser_config = self.config.config.get('browser_cookies', {})
-        browser = browser_config.get('browser', 'firefox')
+        if browser_config.get('enabled'):
+            browser = browser_config.get('browser', 'firefox')
+            logger.info(f"Attempting browser cookie extraction for task {task_id}...")
+            print(f"🔄 Extracting cookies from {browser} browser for task {task_id}...")
 
-        cookie_data = self.cookie_extractor.handle_403_error(browser)
-        if cookie_data:
-            logger.info(f"Successfully refreshed cookies, retrying download for task {task_id}")
+            # Notify about browser cookie extraction attempt
+            await self.notify_403_error(task_id, url, f"正在从 {browser} 浏览器提取 Cookie...", retry_count=self.error_counts[task_id])
 
-            # Update status
-            self.active_downloads[task_id]['status'] = 'retrying'
-            self.active_downloads[task_id]['error'] = 'Refreshing cookies and retrying...'
+            cookie_data = self.cookie_extractor.extract_cookies_from_browser(browser)
+            if cookie_data:
+                logger.info(f"Successfully extracted browser cookies, retrying download for task {task_id}")
+                print(f"✅ Successfully extracted cookies from {browser}")
+                self.active_downloads[task_id]['status'] = 'retrying'
+                self.active_downloads[task_id]['error'] = f'{browser} 浏览器 Cookie 已提取，正在重试...'
 
-            # Retry download with fresh cookies
-            await asyncio.sleep(2)  # Brief delay before retry
-            return True
+                await asyncio.sleep(2)
+                return True
+            else:
+                logger.warning(f"Failed to extract browser cookies from {browser}")
+                print(f"⚠️ Failed to extract cookies from {browser}")
 
+        # If all cookie refresh attempts failed
+        await self.notify_403_error(task_id, url, "Cookie refresh failed", final=True)
         return False

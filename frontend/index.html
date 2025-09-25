@@ -156,6 +156,20 @@
             <div class="card">
                 <div class="card-header">
                     <h2 class="card-title">下载历史</h2>
+                    <div class="history-actions-bar hidden" id="history-actions-bar">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="select-all-checkbox">
+                            <span>全选</span>
+                        </label>
+                        <span class="selected-count" id="selected-count">已选择 0 项</span>
+                        <button class="btn btn-danger btn-small" id="batch-delete-btn">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;">
+                                <polyline points="3 6 5 6 21 6"></polyline>
+                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                            </svg>
+                            批量删除
+                        </button>
+                    </div>
                 </div>
                 <div class="card-content">
                     <div id="history-list" class="history-list">
@@ -208,7 +222,7 @@
                                         启用自动Cookie提取
                                     </label>
                                     <label class="settings-label">
-                                        <input type="checkbox" id="browser-cookies-auto-refresh" checked />
+                                        <input type="checkbox" id="browser-cookies-auto-refresh" />
                                         自动刷新 (每25分钟)
                                     </label>
                                 </div>
@@ -233,7 +247,7 @@
                                 <div id="cookiecloud-config" class="hidden">
                                     <input type="text" id="cookiecloud-server" class="input input-small" placeholder="服务器地址 (如: https://your-server.com)" autocomplete="off">
                                     <input type="text" id="cookiecloud-uuid" class="input input-small" placeholder="UUID密钥" autocomplete="off" spellcheck="false">
-                                    <input type="text" id="cookiecloud-password" class="input input-small" placeholder="加密密码" autocomplete="off" spellcheck="false">
+                                    <input type="password" id="cookiecloud-password" class="input input-small" placeholder="加密密码" autocomplete="off">
 
                                     <label class="settings-label">
                                         <input type="checkbox" id="cookiecloud-auto-sync" checked />
@@ -256,6 +270,12 @@
                             </div>
 
                             <div class="separator-mini"></div>
+
+                            <!-- Cookie状态显示 -->
+                            <div id="cookie-count-display" class="cookie-status-display">
+                                <span class="cookie-status-icon">🍪</span>
+                                <span id="cookie-count-text">检查Cookie状态...</span>
+                            </div>
 
                             <label class="input-label">手动上传Cookies</label>
                             <textarea id="cookies-input" class="textarea" placeholder="粘贴cookies.txt内容..."></textarea>
@@ -421,6 +441,41 @@
                             <div class="settings-col">
                                 <label class="input-label">代理域名（可选）</label>
                                 <input type="text" id="wecom-proxy-domain" class="input" placeholder="例如 https://proxy.example.com">
+                            </div>
+                        </div>
+
+                        <div class="separator-mini"></div>
+
+                        <!-- 管理员通知设置 -->
+                        <h4 class="settings-subtitle">管理员通知设置</h4>
+                        <p class="settings-description">设置管理员用户，所有下载任务都会通知管理员</p>
+
+                        <div class="settings-grid">
+                            <div class="settings-col">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="wecom-notify-admin">
+                                    启用管理员通知
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="settings-grid">
+                            <div class="settings-col" style="grid-column: 1 / -1;">
+                                <label class="input-label">管理员用户ID列表（多个用逗号分隔）</label>
+                                <input type="text" id="wecom-admin-users" class="input"
+                                       placeholder="例如: zhangsan,lisi,wangwu"
+                                       style="width: 100%;">
+                                <small style="color: #888; display: block; margin-top: 5px;">
+                                    提示：管理员自己的下载不会重复通知，其他用户的下载都会通知所有管理员
+                                </small>
+                            </div>
+                        </div>
+
+                        <div class="settings-grid" style="margin-top: 10px;">
+                            <div class="settings-col">
+                                <button id="test-admin-notify-btn" class="btn btn-outline">
+                                    测试管理员通知
+                                </button>
                             </div>
                         </div>
 
