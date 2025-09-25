@@ -6,6 +6,7 @@ from typing import Optional, Dict, Any
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from .config import Config
+from .browser_cookies import BrowserCookieExtractor
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -20,6 +21,10 @@ class YTDownloader:
         self.config = Config()
         # Track download phases for each task (video, audio, merge)
         self.download_phases: Dict[str, Dict[str, Any]] = {}
+        # Initialize browser cookie extractor
+        self.cookie_extractor = BrowserCookieExtractor()
+        # Track 403 errors for automatic retry
+        self.error_counts: Dict[str, int] = {}
 
     def _progress_hook(self, task_id: str):
         def hook(d):
@@ -314,8 +319,35 @@ class YTDownloader:
                 error_msg = str(e)
                 print(f"Download error: {error_msg}")
 
+                # Handle 403 Forbidden error
+                if "403" in error_msg or "Forbidden" in error_msg:
+                    print(f"Detected 403 error for task {task_id}, attempting cookie refresh...")
+                    loop = asyncio.get_event_loop()
+                    retry_success = loop.run_until_complete(self.handle_403_error(task_id, url, format_id))
+
+                    if retry_success:
+                        # Retry with fresh cookies
+                        fresh_opts = self.get_ydl_opts_with_browser_cookies(ydl_opts)
+                        try:
+                            with yt_dlp.YoutubeDL(fresh_opts) as ydl:
+                                info = ydl.extract_info(url, download=True)
+                                filename = ydl.prepare_filename(info)
+
+                                if not filename.endswith('.mp4'):
+                                    base_name = os.path.splitext(filename)[0]
+                                    if os.path.exists(f"{base_name}.mp4"):
+                                        filename = f"{base_name}.mp4"
+
+                                self.active_downloads[task_id]['status'] = 'completed'
+                                self.active_downloads[task_id]['filename'] = os.path.basename(filename)
+                                self.active_downloads[task_id]['filepath'] = os.path.abspath(filename)
+                                return task_id
+                        except Exception as retry_error:
+                            print(f"Retry failed: {retry_error}")
+                            error_msg = str(retry_error)
+
                 # Try multiple fallback strategies if format error
-                if "Requested format is not available" in error_msg:
+                elif "Requested format is not available" in error_msg:
                     print(f"Retrying download with fallback formats for task {task_id}...")
 
                     # Define progressive fallback formats
@@ -376,3 +408,61 @@ class YTDownloader:
             del self.active_downloads[task_id]
         if task_id in self.download_phases:
             del self.download_phases[task_id]
+        if task_id in self.error_counts:
+            del self.error_counts[task_id]
+
+    def get_ydl_opts_with_browser_cookies(self, base_opts: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Get yt-dlp options with browser cookies if enabled"""
+        opts = base_opts or {}
+
+        # Check if browser cookies are enabled in config
+        browser_config = self.config.config.get('browser_cookies', {})
+        if browser_config.get('enabled', False):
+            browser = browser_config.get('browser', 'firefox')
+
+            # Try to get cookies from browser
+            cookie_data = self.cookie_extractor.extract_cookies_from_browser(browser)
+            if cookie_data:
+                # Save cookies to temporary file
+                temp_cookie_file = os.path.join(self.download_dir, f'.cookies_{uuid.uuid4().hex}.txt')
+                self.cookie_extractor.save_cookies_to_file(cookie_data['cookies'], temp_cookie_file)
+
+                opts['cookiefile'] = temp_cookie_file
+                if cookie_data.get('user_agent'):
+                    opts['user_agent'] = cookie_data['user_agent']
+
+                logger.info(f"Using browser cookies from {browser}")
+            else:
+                logger.warning("Failed to extract browser cookies, using fallback")
+
+        return opts
+
+    async def handle_403_error(self, task_id: str, url: str, format_id: Optional[str] = None) -> bool:
+        """Handle 403 error by refreshing cookies and retrying"""
+        logger.info(f"Handling 403 error for task {task_id}")
+
+        # Increment error count
+        self.error_counts[task_id] = self.error_counts.get(task_id, 0) + 1
+
+        # Max 3 retries
+        if self.error_counts[task_id] > 3:
+            logger.error(f"Max retries exceeded for task {task_id}")
+            return False
+
+        # Try to refresh cookies
+        browser_config = self.config.config.get('browser_cookies', {})
+        browser = browser_config.get('browser', 'firefox')
+
+        cookie_data = self.cookie_extractor.handle_403_error(browser)
+        if cookie_data:
+            logger.info(f"Successfully refreshed cookies, retrying download for task {task_id}")
+
+            # Update status
+            self.active_downloads[task_id]['status'] = 'retrying'
+            self.active_downloads[task_id]['error'] = 'Refreshing cookies and retrying...'
+
+            # Retry download with fresh cookies
+            await asyncio.sleep(2)  # Brief delay before retry
+            return True
+
+        return False

@@ -96,6 +96,14 @@ document.addEventListener('DOMContentLoaded', () => {
     initWebSocket();
     loadVersionInfo();
 
+    // Check for yt-dlp updates on page load
+    setTimeout(() => {
+        checkYtDlpUpdate();
+    }, 2000);
+
+    // Check browser cookie status on page load
+    checkBrowserCookieStatus();
+
     // Ensure input field is not disabled
     if (elements.videoUrl) {
         elements.videoUrl.disabled = false;
@@ -156,6 +164,31 @@ function initEventListeners() {
     elements.saveCookiesBtn.addEventListener('click', saveCookies);
     elements.saveSettingsBtn.addEventListener('click', saveSettings);
     elements.resetSettingsBtn.addEventListener('click', resetSettings);
+
+    // yt-dlp update event listeners
+    const checkUpdateBtn = document.getElementById('check-ytdlp-update-btn');
+    const updateBtn = document.getElementById('update-ytdlp-btn');
+    if (checkUpdateBtn) {
+        checkUpdateBtn.addEventListener('click', checkYtDlpUpdate);
+    }
+    if (updateBtn) {
+        updateBtn.addEventListener('click', updateYtDlp);
+    }
+
+    // Browser cookie event listeners
+    const importBrowserCookiesBtn = document.getElementById('import-browser-cookies-btn');
+    const browserCookiesEnabled = document.getElementById('browser-cookies-enabled');
+    const browserCookiesAutoRefresh = document.getElementById('browser-cookies-auto-refresh');
+
+    if (importBrowserCookiesBtn) {
+        importBrowserCookiesBtn.addEventListener('click', importBrowserCookies);
+    }
+    if (browserCookiesEnabled) {
+        browserCookiesEnabled.addEventListener('change', updateBrowserCookieSettings);
+    }
+    if (browserCookiesAutoRefresh) {
+        browserCookiesAutoRefresh.addEventListener('change', updateBrowserCookieSettings);
+    }
 
     // Enter key on URL input
     elements.videoUrl.addEventListener('keypress', (e) => {
@@ -1382,6 +1415,11 @@ async function loadVersionInfo() {
             if (versionDisplay) {
                 versionDisplay.textContent = `v${versionData.app_version} | yt-dlp ${versionData.yt_dlp_version} | Python ${versionData.python_version}`;
             }
+            // Also update yt-dlp version in settings
+            const ytdlpCurrentVersion = document.getElementById('ytdlp-current-version');
+            if (ytdlpCurrentVersion) {
+                ytdlpCurrentVersion.textContent = versionData.yt_dlp_version;
+            }
         } else {
             console.warn('Failed to load version info');
         }
@@ -1392,4 +1430,549 @@ async function loadVersionInfo() {
             versionDisplay.textContent = 'Version info unavailable';
         }
     }
+}
+
+// yt-dlp Update Management
+async function checkYtDlpUpdate() {
+    const checkBtn = document.getElementById('check-ytdlp-update-btn');
+    const updateBtn = document.getElementById('update-ytdlp-btn');
+    const currentVersionEl = document.getElementById('ytdlp-current-version');
+    const latestVersionEl = document.getElementById('ytdlp-latest-version');
+    const updateStatus = document.getElementById('ytdlp-update-status');
+    const updateResult = document.getElementById('ytdlp-update-result');
+
+    // Hide previous results
+    updateResult.classList.add('hidden');
+    updateStatus.classList.add('hidden');
+    updateBtn.classList.add('hidden');
+
+    // Disable check button
+    checkBtn.disabled = true;
+    checkBtn.textContent = '🔄 检查中...';
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/yt-dlp/check-update`);
+        if (response.ok) {
+            const data = await response.json();
+
+            // Update version displays
+            currentVersionEl.textContent = data.current_version;
+            latestVersionEl.textContent = data.latest_version || '未知';
+
+            if (data.update_available) {
+                updateStatus.classList.remove('hidden');
+                updateBtn.classList.remove('hidden');
+
+                // Show release notes if available
+                if (data.release_notes) {
+                    let cleanNotes = data.release_notes;
+
+                    // Try to extract the important changes or changelog section
+                    let importantSection = '';
+
+                    // Look for "Important changes" section
+                    const importantMatch = cleanNotes.match(/#{1,3}\s*Important changes[\s\S]*?(?=\n#{1,3}\s|$)/i);
+                    if (importantMatch) {
+                        importantSection = importantMatch[0];
+                    }
+
+                    // If no important changes, look for Changelog section
+                    if (!importantSection) {
+                        const changelogMatch = cleanNotes.match(/#{1,3}\s*Changelog[\s\S]*?(?=\n#{1,3}\s|$)/i);
+                        if (changelogMatch) {
+                            importantSection = changelogMatch[0];
+                        }
+                    }
+
+                    // If we found a section, use it; otherwise use the beginning of the notes
+                    if (importantSection) {
+                        cleanNotes = importantSection;
+                    }
+
+                    // Clean up the content
+                    cleanNotes = cleanNotes
+                        // Remove markdown headers but keep their text
+                        .replace(/^#{1,6}\s*/gm, '')
+                        // Remove markdown links but keep the text
+                        .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+                        // Remove markdown bold/italic markers
+                        .replace(/(\*{1,2}|_{1,2})(.*?)\1/g, '$2')
+                        // Remove code blocks markers
+                        .replace(/```[\s\S]*?```/g, '')
+                        .replace(/`([^`]+)`/g, '$1')
+                        // Clean up bullet points
+                        .replace(/^\s*[\*\-]\s+/gm, '• ')
+                        // Remove extra whitespace
+                        .replace(/\n{3,}/g, '\n\n')
+                        .trim();
+
+                    // Limit length
+                    if (cleanNotes.length > 800) {
+                        cleanNotes = cleanNotes.substring(0, 800) + '...';
+                    }
+
+                    // Default message if empty
+                    cleanNotes = cleanNotes || '暂无更新说明';
+
+                    updateResult.innerHTML = `
+                        <div style="margin-bottom: 8px;">
+                            <strong style="color: #a78bfa; font-size: 0.95rem;">更新说明:</strong>
+                        </div>
+                        <div style="background: rgba(30, 30, 50, 0.6); padding: 12px; border-radius: 8px; border: 1px solid rgba(167, 139, 250, 0.2);">
+                            <pre style="white-space: pre-wrap; font-size: 0.85rem; margin: 0; line-height: 1.5; color: #f0f0f0; font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;">${cleanNotes}</pre>
+                        </div>
+                    `;
+                    updateResult.classList.remove('hidden', 'error', 'success');
+                }
+            } else if (data.error) {
+                updateResult.textContent = `检查失败: ${data.error}`;
+                updateResult.classList.add('error');
+                updateResult.classList.remove('hidden', 'success');
+            } else {
+                updateResult.textContent = '✅ 已是最新版本';
+                updateResult.classList.add('success');
+                updateResult.classList.remove('hidden', 'error');
+            }
+        } else {
+            throw new Error('Failed to check for updates');
+        }
+    } catch (error) {
+        console.error('Error checking yt-dlp update:', error);
+        updateResult.textContent = `检查失败: ${error.message}`;
+        updateResult.classList.add('error');
+        updateResult.classList.remove('hidden', 'success');
+    } finally {
+        checkBtn.disabled = false;
+        checkBtn.textContent = '🔍 检查更新';
+    }
+}
+
+async function updateYtDlp() {
+    const updateBtn = document.getElementById('update-ytdlp-btn');
+    const updateProgress = document.getElementById('ytdlp-update-progress');
+    const updateMessage = document.getElementById('ytdlp-update-message');
+    const updateResult = document.getElementById('ytdlp-update-result');
+
+    // Show progress
+    updateProgress.classList.remove('hidden');
+    updateBtn.disabled = true;
+    updateResult.classList.add('hidden');
+
+    try {
+        updateMessage.textContent = '正在更新 yt-dlp...';
+
+        const response = await fetch(`${API_BASE_URL}/api/yt-dlp/update`, {
+            method: 'POST'
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+
+            if (data.success) {
+                updateResult.innerHTML = `
+                    ✅ 更新成功!<br>
+                    旧版本: ${data.old_version}<br>
+                    新版本: ${data.new_version}
+                `;
+                updateResult.classList.add('success');
+                updateResult.classList.remove('error', 'hidden');
+
+                // Update version displays
+                document.getElementById('ytdlp-current-version').textContent = data.new_version;
+                document.getElementById('ytdlp-latest-version').textContent = data.new_version;
+
+                // Hide update button and status
+                updateBtn.classList.add('hidden');
+                document.getElementById('ytdlp-update-status').classList.add('hidden');
+
+                // Reload version info
+                await loadVersionInfo();
+            } else {
+                throw new Error(data.message || 'Update failed');
+            }
+        } else {
+            throw new Error('Failed to update yt-dlp');
+        }
+    } catch (error) {
+        console.error('Error updating yt-dlp:', error);
+        updateResult.textContent = `更新失败: ${error.message}`;
+        updateResult.classList.add('error');
+        updateResult.classList.remove('success', 'hidden');
+    } finally {
+        updateProgress.classList.add('hidden');
+        updateBtn.disabled = false;
+    }
+}
+
+// Browser Cookie Management Functions
+async function importBrowserCookies() {
+    const browserSelect = document.getElementById('browser-select');
+    const importBtn = document.getElementById('import-browser-cookies-btn');
+    const statusEl = document.getElementById('browser-cookie-status');
+    const statusText = statusEl.querySelector('.status-text');
+
+    const browser = browserSelect.value;
+
+    // Disable button and show loading
+    importBtn.disabled = true;
+    importBtn.textContent = '🔄 导入中...';
+    statusEl.classList.remove('hidden', 'success', 'error');
+    statusText.textContent = `正在从 ${browser} 导入cookies...`;
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/browser-cookies/import`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                browser: browser,
+                domain: 'youtube.com'
+            })
+        });
+
+        const data = await response.json();
+
+        if (data.success) {
+            statusEl.classList.add('success');
+            statusText.textContent = `✅ 成功从 ${browser} 导入cookies (${data.data.cookie_count} 个)`;
+
+            // Update cookies status
+            await updateCookiesStatus();
+
+            // Enable auto-extraction
+            const enabledCheckbox = document.getElementById('browser-cookies-enabled');
+            if (enabledCheckbox) {
+                enabledCheckbox.checked = true;
+            }
+        } else {
+            statusEl.classList.add('error');
+            statusText.textContent = `❌ ${data.message}`;
+        }
+    } catch (error) {
+        console.error('Error importing cookies:', error);
+        statusEl.classList.add('error');
+        statusText.textContent = `❌ 导入失败: ${error.message}`;
+    } finally {
+        importBtn.disabled = false;
+        importBtn.textContent = '🔄 从浏览器导入';
+    }
+}
+
+async function updateBrowserCookieSettings() {
+    const enabled = document.getElementById('browser-cookies-enabled').checked;
+    const autoRefresh = document.getElementById('browser-cookies-auto-refresh').checked;
+    const browser = document.getElementById('browser-select').value;
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/config`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                browser_cookies: {
+                    enabled: enabled,
+                    browser: browser,
+                    auto_refresh: autoRefresh,
+                    refresh_interval_minutes: 25
+                }
+            })
+        });
+
+        if (response.ok) {
+            console.log('Browser cookie settings updated');
+            await checkBrowserCookieStatus();
+        }
+    } catch (error) {
+        console.error('Error updating browser cookie settings:', error);
+    }
+}
+
+async function checkBrowserCookieStatus() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/browser-cookies/status`);
+        if (response.ok) {
+            const status = await response.json();
+
+            // Update UI based on status
+            const statusEl = document.getElementById('browser-cookie-status');
+            const statusText = statusEl.querySelector('.status-text');
+
+            if (status.cookies_exist) {
+                statusEl.classList.remove('hidden', 'error');
+
+                if (status.cookies_fresh) {
+                    statusEl.classList.add('success');
+                    statusText.textContent = `✅ Cookies有效 (${status.browser})`;
+                } else {
+                    statusEl.classList.remove('success');
+                    statusText.textContent = `⚠️ Cookies需要刷新 (年龄: ${status.cookies_age})`;
+                }
+            }
+
+            // Update checkboxes
+            const enabledCheckbox = document.getElementById('browser-cookies-enabled');
+            const autoRefreshCheckbox = document.getElementById('browser-cookies-auto-refresh');
+
+            if (enabledCheckbox) {
+                enabledCheckbox.checked = status.enabled;
+            }
+            if (autoRefreshCheckbox) {
+                autoRefreshCheckbox.checked = status.auto_refresh;
+            }
+        }
+    } catch (error) {
+        console.error('Error checking browser cookie status:', error);
+    }
+}
+
+// Auto-refresh browser cookies if enabled
+setInterval(async () => {
+    const enabledCheckbox = document.getElementById('browser-cookies-enabled');
+    const autoRefreshCheckbox = document.getElementById('browser-cookies-auto-refresh');
+
+    if (enabledCheckbox && autoRefreshCheckbox &&
+        enabledCheckbox.checked && autoRefreshCheckbox.checked) {
+        // Check if refresh is needed
+        const response = await fetch(`${API_BASE_URL}/api/browser-cookies/status`);
+        if (response.ok) {
+            const status = await response.json();
+            if (!status.cookies_fresh) {
+                console.log('Auto-refreshing browser cookies...');
+                await fetch(`${API_BASE_URL}/api/browser-cookies/refresh`, {
+                    method: 'POST'
+                });
+                await checkBrowserCookieStatus();
+            }
+        }
+    }
+}, 60000); // Check every minute
+
+// CookieCloud functionality
+function initCookieCloud() {
+    const enabledCheckbox = document.getElementById('cookiecloud-enabled');
+    const configDiv = document.getElementById('cookiecloud-config');
+    const testBtn = document.getElementById('test-cookiecloud-btn');
+    const syncBtn = document.getElementById('sync-cookiecloud-btn');
+
+    // Toggle config visibility
+    if (enabledCheckbox) {
+        enabledCheckbox.addEventListener('change', function() {
+            if (this.checked) {
+                configDiv.classList.remove('hidden');
+                loadCookieCloudConfig();
+            } else {
+                configDiv.classList.add('hidden');
+            }
+        });
+    }
+
+    // Test connection
+    if (testBtn) {
+        testBtn.addEventListener('click', async function() {
+            const serverUrl = document.getElementById('cookiecloud-server').value;
+            const uuidKey = document.getElementById('cookiecloud-uuid').value;
+            const password = document.getElementById('cookiecloud-password').value;
+
+            if (!serverUrl || !uuidKey || !password) {
+                showCookieCloudStatus('请填写所有必填字段', 'error');
+                return;
+            }
+
+            // Save config before testing
+            await saveCookieCloudConfig();
+
+            testBtn.disabled = true;
+            testBtn.textContent = '测试中...';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/cookiecloud/test`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        server_url: serverUrl,
+                        uuid_key: uuidKey,
+                        password: password
+                    })
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showCookieCloudStatus(result.message, 'success');
+                } else {
+                    showCookieCloudStatus(result.message, 'error');
+                }
+            } catch (error) {
+                showCookieCloudStatus('测试失败: ' + error.message, 'error');
+            } finally {
+                testBtn.disabled = false;
+                testBtn.textContent = '🔍 测试连接';
+            }
+        });
+    }
+
+    // Sync now
+    if (syncBtn) {
+        syncBtn.addEventListener('click', async function() {
+            // Save config before syncing
+            await saveCookieCloudConfig();
+
+            syncBtn.disabled = true;
+            syncBtn.textContent = '同步中...';
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/cookiecloud/sync`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    // Show the sync result message directly
+                    showCookieCloudStatus(result.message, 'success');
+                    // Don't reload status immediately as it will overwrite the sync message
+                    // Refresh settings
+                    await loadSettings();
+                } else {
+                    const error = await response.json();
+                    showCookieCloudStatus('同步失败: ' + error.detail, 'error');
+                }
+            } catch (error) {
+                showCookieCloudStatus('同步失败: ' + error.message, 'error');
+            } finally {
+                syncBtn.disabled = false;
+                syncBtn.textContent = '🔄 立即同步';
+            }
+        });
+    }
+
+    // Load initial config and status
+    loadCookieCloudConfig();
+    loadCookieCloudStatus();
+}
+
+async function loadCookieCloudStatus(showMessage = true) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/cookiecloud/status`);
+        if (response.ok) {
+            const status = await response.json();
+
+            const enabledCheckbox = document.getElementById('cookiecloud-enabled');
+            const configDiv = document.getElementById('cookiecloud-config');
+
+            if (enabledCheckbox) {
+                enabledCheckbox.checked = status.enabled;
+                if (status.enabled) {
+                    configDiv.classList.remove('hidden');
+                }
+            }
+
+            if (status.configured) {
+                document.getElementById('cookiecloud-server').value = status.server_url || '';
+                document.getElementById('cookiecloud-auto-sync').checked = status.auto_sync;
+
+                // Only show connection status message if requested and not just after a sync
+                if (showMessage && status.connection_status) {
+                    showCookieCloudStatus(status.connection_message, 'success');
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error loading CookieCloud status:', error);
+    }
+}
+
+async function loadCookieCloudConfig() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/config`);
+        if (response.ok) {
+            const config = await response.json();
+            const cookiecloud = config.cookiecloud || {};
+
+            // Load all fields from saved config
+            if (cookiecloud.server_url) {
+                document.getElementById('cookiecloud-server').value = cookiecloud.server_url;
+            }
+            if (cookiecloud.uuid_key) {
+                document.getElementById('cookiecloud-uuid').value = cookiecloud.uuid_key;
+            }
+            if (cookiecloud.password) {
+                document.getElementById('cookiecloud-password').value = cookiecloud.password;
+            }
+            document.getElementById('cookiecloud-auto-sync').checked = cookiecloud.auto_sync !== false;
+
+            // If CookieCloud is enabled, show the config section
+            if (cookiecloud.enabled) {
+                document.getElementById('cookiecloud-enabled').checked = true;
+                document.getElementById('cookiecloud-config').classList.remove('hidden');
+            }
+        }
+    } catch (error) {
+        console.error('Error loading CookieCloud config:', error);
+    }
+}
+
+async function saveCookieCloudConfig() {
+    const enabled = document.getElementById('cookiecloud-enabled').checked;
+    const serverUrl = document.getElementById('cookiecloud-server').value;
+    const uuidKey = document.getElementById('cookiecloud-uuid').value;
+    const password = document.getElementById('cookiecloud-password').value;
+    const autoSync = document.getElementById('cookiecloud-auto-sync').checked;
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/cookiecloud/config`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                enabled: enabled,
+                server_url: serverUrl,
+                uuid_key: uuidKey,
+                password: password,
+                auto_sync: autoSync,
+                sync_interval_minutes: 30
+            })
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            console.log('CookieCloud config saved:', result);
+            return true;
+        }
+    } catch (error) {
+        console.error('Error saving CookieCloud config:', error);
+    }
+    return false;
+}
+
+function showCookieCloudStatus(message, type) {
+    const statusEl = document.getElementById('cookiecloud-status');
+    const statusText = statusEl.querySelector('.status-text');
+
+    statusEl.classList.remove('hidden', 'success', 'error');
+
+    if (type === 'success') {
+        statusEl.classList.add('success');
+        statusText.textContent = '✅ ' + message;
+    } else if (type === 'error') {
+        statusEl.classList.add('error');
+        statusText.textContent = '❌ ' + message;
+    } else {
+        statusText.textContent = message;
+    }
+}
+
+// Auto-save CookieCloud config on change
+document.getElementById('cookiecloud-enabled')?.addEventListener('change', saveCookieCloudConfig);
+document.getElementById('cookiecloud-auto-sync')?.addEventListener('change', saveCookieCloudConfig);
+
+// Initialize CookieCloud when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initCookieCloud);
+} else {
+    initCookieCloud();
 }

@@ -41,10 +41,13 @@
 
 ### 🔧 高级特性
 - Cookie 支持（突破地区限制）
+- CookieCloud 自动同步
+- 浏览器 Cookie 提取
 - 代理服务器配置
 - 自定义 yt-dlp 参数
 - 下载历史管理
 - 多并发下载
+- yt-dlp 在线更新
 
 ## 🛠️ 技术栈
 
@@ -67,7 +70,10 @@ ytb_dl/
 │   ├── __init__.py               # 包初始化
 │   ├── config.py                 # 配置管理
 │   ├── downloader.py             # 下载核心逻辑
-│   └── history_manager.py        # 历史记录管理
+│   ├── history_manager.py        # 历史记录管理
+│   ├── browser_cookies.py        # 浏览器Cookie提取
+│   ├── cookiecloud.py            # CookieCloud同步
+│   └── updater.py                # yt-dlp更新管理
 ├── 💬 wecom/                     # 企业微信集成
 │   ├── __init__.py
 │   ├── client.py                 # WeChat Work 客户端
@@ -293,6 +299,15 @@ GET /api/cookies/count
 
 # 清理 Cookie 缓存
 DELETE /api/cookies/cache
+
+# CookieCloud 同步
+POST /api/cookiecloud/sync
+
+# CookieCloud 配置
+POST /api/cookiecloud/config
+
+# 测试 CookieCloud 连接
+POST /api/cookiecloud/test
 ```
 
 ## ⚙️ 配置详解
@@ -317,6 +332,14 @@ DELETE /api/cookies/cache
     "--concurrent-fragments 5",
     "--throttled-rate 100K"
   ],
+  "cookiecloud": {
+    "enabled": false,
+    "server_url": "https://your-cookiecloud-server.com",
+    "uuid_key": "your_uuid_key",
+    "password": "your_password",
+    "auto_sync": true,
+    "sync_interval_minutes": 30
+  },
   "wecom": {
     "corp_id": "ww1234567890123456",
     "agent_id": 1000001,
@@ -340,6 +363,9 @@ DELETE /api/cookies/cache
 | `extra_params.retries` | int | 重试次数 | `3` |
 | `extra_params.sleep_interval` | int | 请求间隔（秒） | `1` |
 | `custom_params` | array | 自定义 yt-dlp 参数 | 见上方示例 |
+| `cookiecloud.enabled` | bool | 启用CookieCloud同步 | `true` |
+| `cookiecloud.server_url` | string | CookieCloud服务地址 | `"https://cookiecloud.com"` |
+| `cookiecloud.auto_sync` | bool | 自动同步（每30分钟） | `true` |
 
 ### 🏢 企业微信配置
 
@@ -358,8 +384,28 @@ DELETE /api/cookies/cache
 }
 ```
 
-### 🍪 Cookie 文件格式
+### 🍪 Cookie 管理
 
+#### 方式一：CookieCloud 同步（推荐）
+自动从 CookieCloud 服务同步最新 cookies，支持自动定时同步：
+
+```json
+{
+  "cookiecloud": {
+    "enabled": true,
+    "server_url": "https://your-cookiecloud.com",
+    "uuid_key": "your_uuid",
+    "password": "your_password",
+    "auto_sync": true,
+    "sync_interval_minutes": 30
+  }
+}
+```
+
+#### 方式二：浏览器提取
+自动从本地浏览器提取 YouTube cookies，支持 Chrome、Edge、Firefox 等主流浏览器。
+
+#### 方式三：手动上传
 支持 Netscape 格式的 Cookie 文件：
 
 ```txt
@@ -720,9 +766,29 @@ copies of the Software...
 
 ## 📈 更新日志
 
-### v1.0.1 (2025-09-26) ✅
+### v1.0.2 (2025-09-25) 🎉
+- ✨ CookieCloud 集成
+  - 支持自动同步 cookies
+  - 可配置同步间隔（默认30分钟）
+  - AES-256-CBC 加密传输
+- ✨ 浏览器 Cookie 提取
+  - 支持 Chrome、Edge、Firefox 等主流浏览器
+  - 自动检测并提取 YouTube cookies
+  - 每25分钟自动刷新
+- ✨ yt-dlp 在线更新
+  - 检测最新版本
+  - 一键在线更新
+  - 显示更新日志
+- 🎨 UI/UX 改进
+  - 优化 Cookie 管理界面
+  - 改进移动端适配
+  - 增强状态提示可见性
+- 🐛 修复若干已知问题
+
+### v1.0.1 (2025-09-25) ✅
 - ✅ Docker 部署优化
 - ✅ 修复yt-dlp自定义参数
+- ✅ 初步支持Cookie管理
 
 ### v1.0.0 (2025-09-25) ✅
 - ✅ Docker 部署优化
@@ -731,7 +797,7 @@ copies of the Software...
 - ✅ 错误处理改进
 - ✅ API 文档完善
 
-### v0.0.1 (2025-09-25) ✅
+### v0.0.1 (2025-09-24) ✅
 - ✅ 基础视频下载功能
 - ✅ 企业微信通知集成
 - ✅ 现代化 Web 界面

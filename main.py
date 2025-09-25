@@ -14,6 +14,8 @@ from ytb.models import (
 from ytb.downloader import YTDownloader
 from ytb.config import Config
 from ytb.history_manager import HistoryManager
+from ytb.updater import YtDlpUpdater
+from ytb.browser_cookies import BrowserCookieExtractor
 from wecom import WeComService
 from version import __version__
 
@@ -40,6 +42,12 @@ history_manager = HistoryManager()
 
 # Initialize WeCom integration
 wecom_service = WeComService(config, downloader, history_manager)
+
+# Initialize yt-dlp updater
+updater = YtDlpUpdater()
+
+# Initialize browser cookie extractor with CookieCloud config
+cookie_extractor = BrowserCookieExtractor(cookiecloud_config=config.get_cookiecloud_config())
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -361,6 +369,127 @@ async def get_version():
     }
 
 
+@app.get("/api/yt-dlp/check-update")
+async def check_yt_dlp_update():
+    """检查yt-dlp更新"""
+    return await updater.check_for_updates()
+
+
+@app.post("/api/yt-dlp/update")
+async def update_yt_dlp():
+    """更新yt-dlp到最新版本"""
+    global updater
+    result = updater.update_yt_dlp()
+    if result["success"]:
+        # Reinitialize updater with new version
+        updater = YtDlpUpdater()
+    return result
+
+
+@app.get("/api/yt-dlp/version-info")
+async def get_yt_dlp_version_info():
+    """获取详细的版本信息"""
+    return await updater.get_version_info()
+
+
+@app.get("/api/browser-cookies/detect")
+async def detect_browsers():
+    """检测可用的浏览器"""
+    return {
+        "available_browsers": cookie_extractor.detect_available_browsers(),
+        "system_info": cookie_extractor.get_system_info()
+    }
+
+
+@app.post("/api/browser-cookies/import")
+async def import_browser_cookies(request: dict):
+    """从浏览器导入cookies"""
+    browser = request.get('browser', 'firefox')
+    domain = request.get('domain', 'youtube.com')
+
+    result = cookie_extractor.extract_cookies_from_browser(browser, domain)
+
+    if result:
+        # Save to config
+        config.update_config({
+            "browser_cookies": {
+                "enabled": True,
+                "browser": browser,
+                "auto_refresh": True,
+                "refresh_interval_minutes": 25
+            }
+        })
+
+        return {
+            "success": True,
+            "message": f"Successfully imported cookies from {browser}",
+            "data": {
+                "browser": result['browser'],
+                "extracted_at": result['extracted_at'],
+                "cookie_count": len(result['cookies'].split('\n')) - 1  # Exclude header
+            }
+        }
+    else:
+        return {
+            "success": False,
+            "message": f"Failed to import cookies from {browser}",
+            "error": "Could not extract cookies. Make sure the browser is installed and has active YouTube session."
+        }
+
+
+@app.get("/api/browser-cookies/status")
+async def get_browser_cookie_status():
+    """获取浏览器Cookie状态"""
+    browser_config = config.config.get('browser_cookies', {})
+
+    # Check if cookies exist
+    cookies_exist = os.path.exists(cookie_extractor.cookies_file)
+    cookies_fresh = False
+    cookies_age = None
+
+    if cookies_exist and cookie_extractor.last_extraction_time:
+        from datetime import datetime
+        age = datetime.now() - cookie_extractor.last_extraction_time
+        cookies_age = str(age)
+        cookies_fresh = age.total_seconds() < (25 * 60)  # Less than 25 minutes
+
+    return {
+        "enabled": browser_config.get('enabled', False),
+        "browser": browser_config.get('browser', 'firefox'),
+        "auto_refresh": browser_config.get('auto_refresh', True),
+        "cookies_exist": cookies_exist,
+        "cookies_fresh": cookies_fresh,
+        "cookies_age": cookies_age,
+        "last_extraction": cookie_extractor.last_extraction_time.isoformat() if cookie_extractor.last_extraction_time else None
+    }
+
+
+@app.post("/api/browser-cookies/refresh")
+async def refresh_browser_cookies():
+    """手动刷新浏览器cookies"""
+    browser_config = config.config.get('browser_cookies', {})
+    browser = browser_config.get('browser', 'firefox')
+
+    # Force refresh
+    cookie_extractor.last_extraction_time = None
+    result = cookie_extractor.extract_cookies_from_browser(browser)
+
+    if result:
+        return {
+            "success": True,
+            "message": "Cookies refreshed successfully",
+            "data": {
+                "browser": result['browser'],
+                "extracted_at": result['extracted_at']
+            }
+        }
+    else:
+        return {
+            "success": False,
+            "message": "Failed to refresh cookies"
+        }
+
+
 @app.post("/api/config")
 async def update_config(updates: dict):
     """更新配置"""
@@ -479,6 +608,106 @@ async def upload_cookies(data: dict):
         return {"message": "Cookies uploaded successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/cookiecloud/status")
+async def get_cookiecloud_status():
+    """获取CookieCloud配置状态"""
+    cookiecloud_config = config.get_cookiecloud_config()
+
+    # Test connection if configured
+    if cookiecloud_config.get('enabled'):
+        success, message = cookie_extractor.test_cookiecloud_connection()
+        return {
+            "enabled": True,
+            "configured": bool(cookiecloud_config.get('server_url')),
+            "server_url": cookiecloud_config.get('server_url', ''),
+            "auto_sync": cookiecloud_config.get('auto_sync', True),
+            "sync_interval_minutes": cookiecloud_config.get('sync_interval_minutes', 30),
+            "connection_status": success,
+            "connection_message": message
+        }
+    else:
+        return {
+            "enabled": False,
+            "configured": False,
+            "server_url": "",
+            "auto_sync": False,
+            "sync_interval_minutes": 30,
+            "connection_status": False,
+            "connection_message": "CookieCloud is not enabled"
+        }
+
+
+@app.post("/api/cookiecloud/sync")
+async def sync_cookiecloud():
+    """手动触发CookieCloud同步"""
+    success, message = cookie_extractor.sync_cookiecloud()
+
+    if success:
+        # 重新加载下载器配置以应用新的cookies
+        downloader.config = Config()
+        return {"success": True, "message": message}
+    else:
+        raise HTTPException(status_code=500, detail=message)
+
+
+@app.post("/api/cookiecloud/config")
+async def update_cookiecloud_config(data: dict):
+    """更新CookieCloud配置"""
+    try:
+        # Update configuration
+        config.update_config({
+            "cookiecloud": {
+                "enabled": data.get('enabled', False),
+                "server_url": data.get('server_url', ''),
+                "uuid_key": data.get('uuid_key', ''),
+                "password": data.get('password', ''),
+                "auto_sync": data.get('auto_sync', True),
+                "sync_interval_minutes": data.get('sync_interval_minutes', 30)
+            }
+        })
+
+        # Re-initialize cookie extractor with new config
+        global cookie_extractor
+        cookie_extractor = BrowserCookieExtractor(cookiecloud_config=config.get_cookiecloud_config())
+
+        # Test connection if enabled
+        if data.get('enabled'):
+            success, message = cookie_extractor.test_cookiecloud_connection()
+            return {
+                "message": "Configuration updated",
+                "connection_test": {
+                    "success": success,
+                    "message": message
+                }
+            }
+        else:
+            return {"message": "CookieCloud disabled"}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/cookiecloud/test")
+async def test_cookiecloud_connection(data: dict):
+    """测试CookieCloud连接"""
+    from ytb.cookiecloud import CookieCloud
+
+    # Create temporary CookieCloud instance for testing
+    test_config = {
+        'server_url': data.get('server_url', ''),
+        'uuid_key': data.get('uuid_key', ''),
+        'password': data.get('password', '')
+    }
+
+    cookiecloud = CookieCloud(test_config)
+    success, message = cookiecloud.test_connection()
+
+    return {
+        "success": success,
+        "message": message
+    }
 
 # Serve frontend static files
 frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")

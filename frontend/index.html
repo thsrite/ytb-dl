@@ -175,17 +175,128 @@
                     <h2 class="card-title">高级设置</h2>
                 </div>
                 <div class="card-content">
-                    <!-- Cookies设置 -->
-                    <div class="settings-section">
-                        <h3 class="settings-subtitle">YouTube Cookies</h3>
-                        <p class="settings-description">上传cookies.txt文件以绕过年龄限制和地区限制</p>
+                    <!-- Cookies设置和yt-dlp更新管理 (两列布局) -->
+                    <div class="settings-row-container">
+                        <!-- Cookies设置 (左侧，稍宽) -->
+                        <div class="settings-section settings-left">
+                            <h3 class="settings-subtitle">YouTube Cookies</h3>
+                            <p class="settings-description">自动从浏览器提取或手动上传cookies</p>
 
-                        <div class="cookies-status" id="cookies-status">
-                            <span class="status-indicator">🔍 检查中...</span>
+                            <div class="cookies-status" id="cookies-status">
+                                <span class="status-indicator">🔍 检查中...</span>
+                            </div>
+
+                            <!-- Browser Cookie Options -->
+                            <div class="browser-cookie-section">
+                                <label class="input-label">浏览器Cookie提取</label>
+                                <div class="browser-select-group">
+                                    <select id="browser-select" class="select-small">
+                                        <option value="chrome" selected>Chrome</option>
+                                        <option value="firefox">Firefox</option>
+                                        <option value="edge">Edge</option>
+                                        <option value="safari">Safari</option>
+                                        <option value="brave">Brave</option>
+                                    </select>
+                                    <button id="import-browser-cookies-btn" class="btn btn-outline btn-small">
+                                        🔄 从浏览器导入
+                                    </button>
+                                </div>
+
+                                <div class="browser-cookie-options">
+                                    <label class="settings-label">
+                                        <input type="checkbox" id="browser-cookies-enabled" />
+                                        启用自动Cookie提取
+                                    </label>
+                                    <label class="settings-label">
+                                        <input type="checkbox" id="browser-cookies-auto-refresh" checked />
+                                        自动刷新 (每25分钟)
+                                    </label>
+                                </div>
+
+                                <div id="browser-cookie-status" class="browser-status hidden">
+                                    <span class="status-text"></span>
+                                </div>
+                            </div>
+
+                            <div class="separator-mini"></div>
+
+                            <!-- CookieCloud 同步设置 -->
+                            <div class="cookiecloud-section">
+                                <h4 class="settings-subtitle" style="color: #fbbf24;">CookieCloud 同步</h4>
+                                <p class="settings-description">从CookieCloud服务同步cookies</p>
+
+                                <label class="settings-label">
+                                    <input type="checkbox" id="cookiecloud-enabled" />
+                                    启用CookieCloud同步
+                                </label>
+
+                                <div id="cookiecloud-config" class="hidden">
+                                    <input type="text" id="cookiecloud-server" class="input input-small" placeholder="服务器地址 (如: https://your-server.com)" autocomplete="off">
+                                    <input type="text" id="cookiecloud-uuid" class="input input-small" placeholder="UUID密钥" autocomplete="off" spellcheck="false">
+                                    <input type="text" id="cookiecloud-password" class="input input-small" placeholder="加密密码" autocomplete="off" spellcheck="false">
+
+                                    <label class="settings-label">
+                                        <input type="checkbox" id="cookiecloud-auto-sync" checked />
+                                        自动同步 (每30分钟)
+                                    </label>
+
+                                    <div class="browser-select-container">
+                                        <button id="test-cookiecloud-btn" class="btn btn-outline btn-small">
+                                            🔍 测试连接
+                                        </button>
+                                        <button id="sync-cookiecloud-btn" class="btn btn-primary btn-small">
+                                            🔄 立即同步
+                                        </button>
+                                    </div>
+
+                                    <div id="cookiecloud-status" class="browser-status hidden">
+                                        <span class="status-text"></span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="separator-mini"></div>
+
+                            <label class="input-label">手动上传Cookies</label>
+                            <textarea id="cookies-input" class="textarea" placeholder="粘贴cookies.txt内容..."></textarea>
+                            <button id="save-cookies-btn" class="btn btn-primary btn-small">保存Cookies</button>
                         </div>
 
-                        <textarea id="cookies-input" class="textarea" placeholder="粘贴cookies.txt内容..."></textarea>
-                        <button id="save-cookies-btn" class="btn btn-primary">保存Cookies</button>
+                        <!-- yt-dlp 更新管理 (右侧，稍窄) -->
+                        <div class="settings-section settings-right">
+                            <h3 class="settings-subtitle">yt-dlp 更新管理</h3>
+                            <p class="settings-description">检查并更新yt-dlp到最新版本</p>
+
+                            <div class="ytdlp-version-info" id="ytdlp-version-info">
+                                <div class="version-status">
+                                    <span class="version-label">当前版本:</span>
+                                    <span id="ytdlp-current-version" class="version-value">加载中...</span>
+                                </div>
+                                <div class="version-status">
+                                    <span class="version-label">最新版本:</span>
+                                    <span id="ytdlp-latest-version" class="version-value">检查中...</span>
+                                </div>
+                                <div id="ytdlp-update-status" class="update-status hidden">
+                                    <span class="update-badge">有更新可用</span>
+                                </div>
+                            </div>
+
+                            <div class="update-actions">
+                                <button id="check-ytdlp-update-btn" class="btn btn-outline btn-small">
+                                    🔍 检查更新
+                                </button>
+                                <button id="update-ytdlp-btn" class="btn btn-success btn-small hidden">
+                                    ⬆️ 更新
+                                </button>
+                            </div>
+
+                            <div id="ytdlp-update-progress" class="update-progress hidden">
+                                <div class="spinner"></div>
+                                <span id="ytdlp-update-message">正在更新...</span>
+                            </div>
+
+                            <div id="ytdlp-update-result" class="update-result hidden"></div>
+                        </div>
                     </div>
 
                     <div class="separator"></div>

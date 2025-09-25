@@ -18,6 +18,12 @@ class Config:
             "cookies_file": None,
             "proxy": None,
             "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "browser_cookies": {
+                "enabled": False,
+                "browser": "chrome",  # chrome, firefox, edge, safari, brave
+                "auto_refresh": True,
+                "refresh_interval_minutes": 25
+            },
             "extra_params": {
                 "nocheckcertificate": True,
                 "geo_bypass": True,
@@ -29,6 +35,14 @@ class Config:
                 "skip_unavailable_fragments": True
             },
             "custom_params": [],  # 自定义参数列表
+            "cookiecloud": {
+                "enabled": False,
+                "server_url": "",
+                "uuid_key": "",
+                "password": "",
+                "auto_sync": True,
+                "sync_interval_minutes": 30
+            },
             "wecom": {
                 "corp_id": "",
                 "agent_id": None,
@@ -74,6 +88,10 @@ class Config:
         """更新配置"""
         self.config = self._deep_merge(self.config, updates)
         return self.save_config()
+
+    def get_cookiecloud_config(self) -> Dict[str, Any]:
+        """Return the current CookieCloud configuration block."""
+        return self.config.get("cookiecloud", {}).copy()
 
     def get_wecom_config(self) -> Dict[str, Any]:
         """Return the current WeCom configuration block."""
