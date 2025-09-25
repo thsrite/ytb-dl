@@ -287,29 +287,6 @@ Content-Type: application/json
 }
 ```
 
-### 🍪 Cookie 管理
-
-```http
-# 上传 Cookie 文件
-POST /api/cookies/upload
-Content-Type: multipart/form-data
-
-# 获取 Cookie 统计
-GET /api/cookies/count
-
-# 清理 Cookie 缓存
-DELETE /api/cookies/cache
-
-# CookieCloud 同步
-POST /api/cookiecloud/sync
-
-# CookieCloud 配置
-POST /api/cookiecloud/config
-
-# 测试 CookieCloud 连接
-POST /api/cookiecloud/test
-```
-
 ## ⚙️ 配置详解
 
 ### 📄 主配置文件 `config/config.json`
