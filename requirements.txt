@@ -7,3 +7,4 @@ httpx==0.27.2
 pycryptodome==3.21.0
 packaging
 browser-cookie3
+requests
