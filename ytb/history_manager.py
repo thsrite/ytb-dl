@@ -27,7 +27,6 @@ class HistoryManager:
             try:
                 with open(self.history_file, 'r', encoding='utf-8') as f:
                     self.history = json.load(f)
-                logger.info(f"Loaded {len(self.history)} history entries")
             except Exception as e:
                 logger.error(f"Error loading history: {e}")
                 self.history = []

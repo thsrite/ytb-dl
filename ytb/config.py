@@ -44,13 +44,10 @@ class Config:
 
     def load_config(self) -> Dict[str, Any]:
         """加载配置文件"""
-        print(f"Loading config from: {self.config_file}")
-
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     loaded = json.load(f)
-                    print(f"Successfully loaded existing config with {len(loaded)} keys")
                     # 合并默认配置和加载的配置
                     return self._deep_merge(self.default_config, loaded)
             except Exception as e:
@@ -58,7 +55,6 @@ class Config:
                 print("Falling back to default config")
         else:
             # 文件不存在，创建默认配置文件
-            print(f"Config file does not exist, creating default at: {self.config_file}")
             self._ensure_dir()
             self._create_default_config()
         return self.default_config.copy()
@@ -88,16 +84,39 @@ class Config:
         # Check if running in Docker for environment-specific settings
         is_docker = os.path.exists("/app")
 
-        opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'user_agent': self.config.get('user_agent'),
-            'recode_video': 'mp4',  # Force convert all videos to MP4
-            **self.config.get('extra_params', {})
-        }
+        # Check if custom_params are provided
+        custom_params = self.config.get('custom_params', [])
 
-        # Docker-specific enhancements
-        if is_docker:
+        # If custom_params exist, only use base required parameters
+        if custom_params:
+            # Base required parameters
+            opts = {
+                'quiet': True,
+                'no_warnings': True,
+            }
+
+            # Add cookies file if exists
+            cookies_file = self._get_cookies_file()
+            if cookies_file:
+                opts['cookiefile'] = cookies_file
+
+            # Add no_check_certificate
+            opts['nocheckcertificate'] = True
+
+            # Add geo_bypass
+            opts['geo_bypass'] = True
+        else:
+            # Use default parameters when no custom params
+            opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'user_agent': self.config.get('user_agent'),
+                'merge_output_format': 'mp4',  # Merge to MP4 format
+                **self.config.get('extra_params', {})
+            }
+
+        # Docker-specific enhancements (only apply if not using custom_params)
+        if is_docker and not custom_params:
             opts.update({
                 'force_ipv4': True,  # Force IPv4 in Docker environments
                 'prefer_insecure': False,  # Keep secure connections
@@ -114,10 +133,11 @@ class Config:
                 }
             })
 
-        # 添加cookies文件
-        cookies_file = self._get_cookies_file()
-        if cookies_file:
-            opts['cookiefile'] = cookies_file
+        # 添加cookies文件 (仅在没有custom_params时，因为在有custom_params时已经添加了)
+        if not custom_params:
+            cookies_file = self._get_cookies_file()
+            if cookies_file:
+                opts['cookiefile'] = cookies_file
 
         # 添加代理
         if self.config.get('proxy'):

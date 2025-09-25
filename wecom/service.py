@@ -54,7 +54,6 @@ class WeComService:
                     encoding_aes_key=self.wecom_config.get("encoding_aes_key", ""),
                     corp_id=self.wecom_config.get("corp_id", ""),
                 )
-                logger.info("WeCom integration initialized")
             except Exception as exc:  # noqa: BLE001
                 self.client = None
                 self.crypto = None

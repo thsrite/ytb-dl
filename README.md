@@ -3,7 +3,7 @@
 [![Build Status](https://github.com/thsrite/ytb-dl/actions/workflows/docker-build.yml/badge.svg)](https://github.com/thsrite/ytb-dl/actions)
 [![Docker Pulls](https://img.shields.io/docker/pulls/thsrite/ytb-dl)](https://hub.docker.com/r/thsrite/ytb-dl)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
 一个功能强大的 YouTube 视频下载器，集成企业微信应用交互下载、通知、多格式支持、实时进度监控和现代化 Web 界面。基于 FastAPI 和 yt-dlp 构建，支持 Docker 部署和源码部署。
 
@@ -23,7 +23,7 @@
 - 保留原始音频质量
 
 ### 📱 企业微信集成
-- WeChat Work 消息通知
+- 企业微信应用交互下载
 - 下载完成自动推送
 - 视频缩略图展示
 - 新闻卡片式消息
@@ -111,7 +111,7 @@ open http://localhost:9832
 ### 方法二：源码部署
 
 #### 环境要求
-- Python 3.11+
+- Python 3.12+
 - ffmpeg（音视频处理）
 - Git
 

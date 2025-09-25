@@ -2,7 +2,6 @@ import yt_dlp
 import os
 import uuid
 import logging
-import json
 from typing import Optional, Dict, Any
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
@@ -238,28 +237,49 @@ class YTDownloader:
         # Add URL
         command_parts.append(f'"{url}"')
 
-        # Add format
-        command_parts.append(f'-f "{format_str}"')
+        # Check if custom params are configured
+        custom_params = self.config.config.get('custom_params', [])
 
-        # Add output template
-        command_parts.append(f'-o "{output_template}"')
+        if custom_params:
+            # When custom params exist, only add base required params
+            # Add cookies if configured
+            if ydl_opts.get('cookiefile'):
+                command_parts.append(f'--cookies "{ydl_opts["cookiefile"]}"')
 
-        # Add recode video format
-        command_parts.append('--recode-video mp4')
-
-        # Add proxy if configured
-        if ydl_opts.get('proxy'):
-            command_parts.append(f'--proxy "{ydl_opts["proxy"]}"')
-
-        # Add cookies if configured
-        if ydl_opts.get('cookiefile'):
-            command_parts.append(f'--cookies "{ydl_opts["cookiefile"]}"')
-
-        # Add other common options
-        if ydl_opts.get('nocheckcertificate'):
+            # Add no-check-certificate
             command_parts.append('--no-check-certificate')
-        if ydl_opts.get('geo_bypass'):
+
+            # Add geo-bypass
             command_parts.append('--geo-bypass')
+
+            # Add all custom parameters
+            for param in custom_params:
+                if param and isinstance(param, str):
+                    command_parts.append(param)
+        else:
+            # Use default parameters when no custom params
+            # Add format
+            command_parts.append(f'-f "{format_str}"')
+
+            # Add output template
+            command_parts.append(f'-o "{output_template}"')
+
+            # Add merge output format
+            command_parts.append('--merge-output-format mp4')
+
+            # Add proxy if configured
+            if ydl_opts.get('proxy'):
+                command_parts.append(f'--proxy "{ydl_opts["proxy"]}"')
+
+            # Add cookies if configured
+            if ydl_opts.get('cookiefile'):
+                command_parts.append(f'--cookies "{ydl_opts["cookiefile"]}"')
+
+            # Add other common options
+            if ydl_opts.get('nocheckcertificate'):
+                command_parts.append('--no-check-certificate')
+            if ydl_opts.get('geo_bypass'):
+                command_parts.append('--geo-bypass')
 
         # Log the command
         command_str = ' '.join(command_parts)
