@@ -116,7 +116,7 @@ class YTDownloader:
             'extract_flat': False,
             'no_color': True,
             'logtostderr': False,
-            'no_warnings': False,  # Enable warnings to see what's happening
+            'no_warnings': True,  # Disable warnings to avoid cookie rotation messages
             'ignoreerrors': False,
         })
 
@@ -336,6 +336,7 @@ class YTDownloader:
                             if is_docker:
                                 fallback_opts.update({
                                     'ignoreerrors': True,
+                                    'quiet': True,
                                     'no_warnings': True,
                                     'extract_flat': False,
                                 })

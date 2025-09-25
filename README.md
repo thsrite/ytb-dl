@@ -1,5 +1,9 @@
 # YouTube Video Downloader
 
+<div align="center">
+  <img src="ytb-dl.png" alt="YTB-DL Logo" width="200">
+</div>
+
 [![Build Status](https://github.com/thsrite/ytb-dl/actions/workflows/docker-build.yml/badge.svg)](https://github.com/thsrite/ytb-dl/actions)
 [![Docker Pulls](https://img.shields.io/docker/pulls/thsrite/ytb-dl)](https://hub.docker.com/r/thsrite/ytb-dl)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -715,6 +719,10 @@ copies of the Software...
 ![Docker Pulls](https://img.shields.io/docker/pulls/thsrite/ytb-dl)
 
 ## 📈 更新日志
+
+### v1.0.1 (2025-09-26) ✅
+- ✅ Docker 部署优化
+- ✅ 修复yt-dlp自定义参数
 
 ### v1.0.0 (2025-09-25) ✅
 - ✅ Docker 部署优化

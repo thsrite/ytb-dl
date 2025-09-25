@@ -15,6 +15,7 @@ from ytb.downloader import YTDownloader
 from ytb.config import Config
 from ytb.history_manager import HistoryManager
 from wecom import WeComService
+from version import __version__
 
 app = FastAPI(title="YouTube Video Downloader API")
 
@@ -354,7 +355,7 @@ async def get_version():
     import yt_dlp
     import sys
     return {
-        "app_version": "1.0.0",
+        "app_version": __version__,
         "yt_dlp_version": yt_dlp.version.__version__,
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     }
