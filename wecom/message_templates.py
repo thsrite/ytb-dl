@@ -81,7 +81,7 @@ class MessageTemplates:
             description_parts.append(f"📹 标题: {title}")
 
         if file_size:
-            description_parts.append(f"💾 大小: {file_size}")
+            description_parts.append(f"📦 大小: {file_size}")
 
         if duration:
             description_parts.append(f"⏱️ 耗时: {duration}")
@@ -96,15 +96,16 @@ class MessageTemplates:
 
         description_parts.append(f"🕐 时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-        description = "\n".join(description_parts)
-
         # 确定链接
         if status == 'complete' and download_link:
             link = download_link
+            description_parts.append("\n💾 点击卡片下载文件")
         elif url:
             link = url
         else:
             link = None
+
+        description = "\n".join(description_parts)
 
         return {
             'title': msg_title,
