@@ -23,11 +23,14 @@ RUN apt-get update && \
         build-essential \
         git \
         libass-dev \
+        libaom-dev \
         libdrm-dev \
+        libdav1d-dev \
         libmfx-dev \
         libmfx-tools \
         libssl-dev \
         libva-dev \
+        libsvtav1-dev \
         libx264-dev \
         libx265-dev \
         nasm \
@@ -45,9 +48,12 @@ RUN ./configure \
         --prefix=/usr/local \
         --enable-gpl \
         --enable-nonfree \
+        --enable-libaom \
+        --enable-libdav1d \
         --enable-libass \
         --enable-libdrm \
         --enable-libmfx \
+        --enable-libsvtav1 \
         --enable-libx264 \
         --enable-libx265 \
         --enable-vaapi \
@@ -87,9 +93,13 @@ RUN apt-get update && \
         ca-certificates \
         intel-media-va-driver-non-free \
         libass9 \
+        libaom3 \
         libdrm2 \
+        libdav1d7 \
         libmfx1 \
         libva2 \
+        libsvtav1dec1 \
+        libsvtav1enc1 \
         libx264-164 \
         libx265-199 \
         python3 \

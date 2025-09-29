@@ -28,6 +28,88 @@ class YTDownloader:
         # Store 403 notification callbacks per task
         self.notification_callbacks: Dict[str, Any] = {}
 
+    @staticmethod
+    def _is_authentication_error(error_msg: str) -> bool:
+        """Detect if an error message is likely caused by expired cookies or auth."""
+        if not error_msg:
+            return False
+
+        lowered = error_msg.lower()
+        keywords = [
+            'sign in',
+            'signin',
+            "log in",
+            'login',
+            'consent',
+            'verify that you are not a bot',
+            'not a bot',
+            'authentication',
+            'unauthorized',
+            'cookie',
+            '403',
+            'forbidden',
+            'join this channel',
+            'please sign in',
+        ]
+
+        return any(keyword in lowered for keyword in keywords)
+
+    async def _refresh_cookies_after_failure(self, context: str) -> bool:
+        """Attempt to refresh cookies via CookieCloud or browser extraction."""
+        refreshed = False
+        loop = asyncio.get_event_loop()
+
+        cookiecloud_config = self.config.config.get('cookiecloud', {})
+        if cookiecloud_config.get('enabled'):
+            logger.info(f"Attempting CookieCloud sync for {context}...")
+            print(f"🔄 Syncing cookies from CookieCloud for {context}...")
+
+            from .cookiecloud import CookieCloud
+
+            def sync_cookiecloud():
+                cc = CookieCloud(cookiecloud_config)
+                return cc.sync_cookies()
+
+            success, message = await loop.run_in_executor(self.executor, sync_cookiecloud)
+
+            if success:
+                logger.info(f"CookieCloud sync successful: {message}")
+                print(f"✅ CookieCloud sync successful: {message}")
+                refreshed = True
+            else:
+                logger.warning(f"CookieCloud sync failed: {message}")
+                print(f"⚠️ CookieCloud sync failed: {message}")
+
+        browser_config = self.config.config.get('browser_cookies', {})
+        if browser_config.get('enabled'):
+            browser = browser_config.get('browser', 'firefox')
+            logger.info(f"Attempting browser cookie extraction for {context}...")
+            print(f"🔄 Extracting cookies from {browser} browser for {context}...")
+
+            def extract_browser_cookies():
+                return self.cookie_extractor.extract_cookies_from_browser(browser)
+
+            cookie_data = await loop.run_in_executor(self.executor, extract_browser_cookies)
+
+            if cookie_data and cookie_data.get('cookies'):
+                target_path = self.config.get_cookies_output_path()
+                if self.cookie_extractor.save_cookies_to_file(cookie_data['cookies'], target_path):
+                    refreshed = True
+                    logger.info(f"Saved refreshed browser cookies to {target_path}")
+                    print(f"✅ Saved refreshed browser cookies to {target_path}")
+
+                    # Update user agent in memory for immediate reuse
+                    if cookie_data.get('user_agent'):
+                        self.config.config['user_agent'] = cookie_data['user_agent']
+                else:
+                    logger.warning("Failed to persist browser cookies after extraction")
+                    print("⚠️ Failed to save refreshed browser cookies")
+            else:
+                logger.warning(f"Failed to extract browser cookies from {browser}")
+                print(f"⚠️ Failed to extract cookies from {browser}")
+
+        return refreshed
+
     def _progress_hook(self, task_id: str):
         def hook(d):
             if task_id in self.active_downloads:
@@ -119,42 +201,84 @@ class YTDownloader:
         return hook
 
     async def get_video_info(self, url: str) -> Dict[str, Any]:
-        ydl_opts = self.config.get_ydl_opts({
-            'extract_flat': False,
-            'no_color': True,
-            'logtostderr': False,
-            'no_warnings': True,  # Disable warnings to avoid cookie rotation messages
-            'ignoreerrors': False,
-        })
+        max_retries = 3
+        retry_count = 0
 
-        loop = asyncio.get_event_loop()
+        while retry_count <= max_retries:
+            ydl_opts = self.config.get_ydl_opts({
+                'extract_flat': False,
+                'no_color': True,
+                'logtostderr': False,
+                'no_warnings': True,  # Disable warnings to avoid cookie rotation messages
+                'ignoreerrors': False,
+            })
 
-        def extract_info():
+            loop = asyncio.get_event_loop()
+
+            def extract_info():
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        return ydl.extract_info(url, download=False)
+                except Exception as e:
+                    error_msg = str(e)
+                    print(f"Error extracting info: {error_msg}")
+
+                    # Try with more permissive options if format error
+                    if "Requested format is not available" in error_msg:
+                        print("Retrying with more permissive format options...")
+                        fallback_opts = ydl_opts.copy()
+                        fallback_opts.update({
+                            'format': 'best',
+                            'no_warnings': True,
+                        })
+                        try:
+                            with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
+                                return ydl_fallback.extract_info(url, download=False)
+                        except Exception as e2:
+                            print(f"Fallback also failed: {str(e2)}")
+                            raise e2
+                    raise
+
             try:
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    return ydl.extract_info(url, download=False)
+                info = await loop.run_in_executor(self.executor, extract_info)
+                # Success, return the info
+                return self._format_video_info(info, url)
             except Exception as e:
                 error_msg = str(e)
-                print(f"Error extracting info: {error_msg}")
 
-                # Try with more permissive options if format error
-                if "Requested format is not available" in error_msg:
-                    print("Retrying with more permissive format options...")
-                    fallback_opts = ydl_opts.copy()
-                    fallback_opts.update({
-                        'format': 'best',
-                        'no_warnings': True,
-                    })
-                    try:
-                        with yt_dlp.YoutubeDL(fallback_opts) as ydl_fallback:
-                            return ydl_fallback.extract_info(url, download=False)
-                    except Exception as e2:
-                        print(f"Fallback also failed: {str(e2)}")
-                        raise e2
+                # Check if it's an authentication error (similar to 403 handling)
+                if self._is_authentication_error(error_msg):
+
+                    retry_count += 1
+                    if retry_count > max_retries:
+                        logger.error(f"Max retries exceeded for getting video info: {url}")
+                        raise
+
+                    logger.info(
+                        f"Authentication error detected while fetching video info, refreshing cookies "
+                        f"(attempt {retry_count}/{max_retries})"
+                    )
+                    print(f"🔐 Authentication required, refreshing cookies... (attempt {retry_count}/{max_retries})")
+
+                    refreshed = await self._refresh_cookies_after_failure('video info')
+
+                    if refreshed:
+                        await asyncio.sleep(1)
+                        continue
+
+                    if retry_count < max_retries:
+                        print(f"⏳ Waiting before retry {retry_count}/{max_retries}...")
+                        await asyncio.sleep(2)
+                        continue
+
+                # Not an authentication error, raise immediately
                 raise
 
-        info = await loop.run_in_executor(self.executor, extract_info)
+        # This should not be reached, but just in case
+        raise Exception("Failed to get video info after all retries")
 
+    def _format_video_info(self, info: Dict[str, Any], url: str) -> Dict[str, Any]:
+        """Format video info response"""
         # Format the response
         formats = []
         if info.get('formats'):

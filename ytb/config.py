@@ -103,6 +103,22 @@ class Config:
         """Return the current WeCom configuration block."""
         return self.config.get("wecom", {}).copy()
 
+    def get_effective_cookies_file(self) -> Optional[str]:
+        """Return the currently usable cookies file path if it exists."""
+        return self._get_cookies_file()
+
+    def get_cookies_output_path(self) -> str:
+        """Return the path where refreshed cookies should be stored."""
+        cookies_file = self.config.get('cookies_file')
+        if cookies_file:
+            directory = os.path.dirname(cookies_file)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            return cookies_file
+
+        os.makedirs(self.config_dir, exist_ok=True)
+        return os.path.join(self.config_dir, "cookies.txt")
+
     def get_ydl_opts(self, additional_opts: Optional[Dict] = None) -> Dict[str, Any]:
         """获取yt-dlp选项"""
         # Check if running in Docker for environment-specific settings

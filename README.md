@@ -127,6 +127,23 @@ docker-compose up -d
 open http://localhost:9832
 ```
 
+#### ⚡ 启用核显加速（Intel Quick Sync）
+
+```bash
+docker run -d \
+  --name ytb-downloader \
+  -p 9832:9832 \
+  -v ./downloads:/app/downloads \
+  -v ./config:/app/config \
+  --device /dev/dri \
+  -e LIBVA_DRIVER_NAME=iHD \
+  thsrite/ytb-dl:latest
+```
+
+- 确保宿主机已启用 VA-API（`vainfo` 可正常输出）
+- 如需在非 root 用户下访问核显，记得将用户加入 `video` 组
+- GitHub Actions 构建输出为 `linux/amd64` 架构镜像，便于 iGPU 加速
+
 ### 方法二：源码部署
 
 #### 环境要求
@@ -751,6 +768,12 @@ copies of the Software...
 ![Docker Pulls](https://img.shields.io/docker/pulls/thsrite/ytb-dl)
 
 ## 📈 更新日志
+
+### v1.0.5 (2025-09-29) 🚀
+- 🔃 获取视频信息时检测到 Cookie 失效后，会自动同步 CookieCloud/浏览器最新 Cookie 并落盘
+- 🎞️ Docker 镜像内置 Intel Quick Sync / VA-API 支持，可直接使用核显加速转码
+- 🐳 GitHub Actions 限定 `linux/amd64` 构建，避免跨架构导致的构建失败
+- 🐍 运行阶段使用独立虚拟环境安装依赖，保持系统 Python 环境干净
 
 ### v1.0.4 (2025-09-26) 🚀
 - 优化消息发送模版
