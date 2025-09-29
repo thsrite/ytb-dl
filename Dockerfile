@@ -98,8 +98,8 @@ RUN apt-get update && \
         libdav1d7 \
         libmfx1 \
         libva2 \
-        libsvtav1dec1 \
-        libsvtav1enc1 \
+        libsvtav1dec2 \
+        libsvtav1enc2 \
         libx264-164 \
         libx265-199 \
         python3 \
