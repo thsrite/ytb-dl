@@ -72,7 +72,8 @@ RUN if [ "${TARGETARCH:-amd64}" != "amd64" ]; then \
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
-    PATH=/usr/local/bin:$PATH
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:/usr/local/bin:$PATH
 
 RUN printf '%s\n' \
         'deb http://archive.ubuntu.com/ubuntu/ noble main restricted universe multiverse' \
@@ -96,6 +97,7 @@ RUN apt-get update && \
         python3-venv \
         vainfo \
         wget && \
+    python3 -m venv "$VIRTUAL_ENV" && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy FFmpeg from the build stage
@@ -105,8 +107,8 @@ WORKDIR /app
 
 # Install Python dependencies first for better layer caching
 COPY requirements.txt ./
-RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    python3 -m pip install --no-cache-dir -r requirements.txt && \
+RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    python -m pip install --no-cache-dir -r requirements.txt && \
     mkdir -p /app/downloads /app/config
 
 # Copy entrypoint script separately to avoid cache invalidation
@@ -119,4 +121,4 @@ COPY . .
 EXPOSE 9832
 
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["python3", "main.py"]
+CMD ["python", "main.py"]
