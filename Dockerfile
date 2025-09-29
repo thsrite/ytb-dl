@@ -1,41 +1,110 @@
-# Multi-stage build for smaller final image
-FROM python:3.12-alpine AS builder
+# Stage 1: build FFmpeg with Intel Quick Sync/VA-API support
+FROM ubuntu:24.04 AS ffmpeg-builder
 
-# Install build dependencies and Python packages in a single layer
-COPY requirements.txt .
-RUN apk add --no-cache gcc musl-dev libffi-dev openssl-dev && \
-    pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir --user -r requirements.txt && \
-    apk del gcc musl-dev libffi-dev openssl-dev
+ENV DEBIAN_FRONTEND=noninteractive \
+    FFMPEG_VERSION=6.1
 
-# Final stage
-FROM python:3.12-alpine
+RUN printf '%s\n' \
+        'deb http://archive.ubuntu.com/ubuntu/ noble main restricted universe multiverse' \
+        'deb http://archive.ubuntu.com/ubuntu/ noble-updates main restricted universe multiverse' \
+        'deb http://archive.ubuntu.com/ubuntu/ noble-backports main restricted universe multiverse' \
+        'deb http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse' \
+    > /etc/apt/sources.list
 
-# Set environment variables early for layer caching
-ENV PYTHONPATH=/app \
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        build-essential \
+        git \
+        libass-dev \
+        libdrm-dev \
+        libmfx-dev \
+        libmfx-tools \
+        libssl-dev \
+        libva-dev \
+        libx264-dev \
+        libx265-dev \
+        nasm \
+        pkg-config \
+        yasm && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /usr/src
+
+RUN git clone --depth 1 -b n${FFMPEG_VERSION} https://git.ffmpeg.org/ffmpeg.git ffmpeg
+
+WORKDIR /usr/src/ffmpeg
+
+RUN ./configure \
+        --prefix=/usr/local \
+        --enable-gpl \
+        --enable-nonfree \
+        --enable-libass \
+        --enable-libdrm \
+        --enable-libmfx \
+        --enable-libx264 \
+        --enable-libx265 \
+        --enable-vaapi \
+        --disable-doc \
+        --disable-ffplay \
+        --disable-ffprobe && \
+    make -j"$(nproc)" && \
+    make install
+
+RUN rm -rf /usr/src/ffmpeg
+
+
+# Stage 2: application runtime with compiled FFmpeg
+FROM ubuntu:24.04
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
-    PATH=/root/.local/bin:$PATH
+    PATH=/usr/local/bin:$PATH
 
-# Install runtime dependencies and setup in a single layer
-RUN apk add --no-cache ffmpeg wget && \
-    mkdir -p /app/downloads /app/config
+RUN printf '%s\n' \
+        'deb http://archive.ubuntu.com/ubuntu/ noble main restricted universe multiverse' \
+        'deb http://archive.ubuntu.com/ubuntu/ noble-updates main restricted universe multiverse' \
+        'deb http://archive.ubuntu.com/ubuntu/ noble-backports main restricted universe multiverse' \
+        'deb http://security.ubuntu.com/ubuntu noble-security main restricted universe multiverse' \
+    > /etc/apt/sources.list
 
-# Copy Python packages from builder stage
-COPY --from=builder /root/.local /root/.local
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        intel-media-va-driver-non-free \
+        libass9 \
+        libdrm2 \
+        libmfx1 \
+        libva2 \
+        libx264-164 \
+        libx265-199 \
+        python3 \
+        python3-pip \
+        python3-venv \
+        vainfo \
+        wget && \
+    rm -rf /var/lib/apt/lists/*
 
-# Set working directory
+# Copy FFmpeg from the build stage
+COPY --from=ffmpeg-builder /usr/local /usr/local
+
 WORKDIR /app
 
-# Copy entrypoint script first (less likely to change)
+# Install Python dependencies first for better layer caching
+COPY requirements.txt ./
+RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel && \
+    python3 -m pip install --no-cache-dir -r requirements.txt && \
+    mkdir -p /app/downloads /app/config
+
+# Copy entrypoint script separately to avoid cache invalidation
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# Copy application code last (most likely to change)
+# Copy application source code
 COPY . .
 
-# Expose port
 EXPOSE 9832
 
-# Set entrypoint and default command
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-CMD ["python", "main.py"]
+CMD ["python3", "main.py"]
