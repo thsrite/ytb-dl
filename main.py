@@ -181,16 +181,10 @@ async def start_download(request: DownloadRequest):
                         except Exception as e:
                             logger.error(f"Failed to notify admin {admin}: {e}")
 
-        # Register the callback
-        downloader.set_403_notification_callback(task_id, web_error_callback)
-
-        # Start download with pre-assigned task_id
-        actual_task_id = await downloader.download_video_with_id(request.url, task_id, request.format_id)
-
-        # Get video info for history
+        # Get video info BEFORE starting download
         info = await downloader.get_video_info(request.url)
 
-        # Add to history
+        # Add to history with correct info
         history_entry = {
             "id": task_id,
             "url": request.url,
@@ -203,6 +197,12 @@ async def start_download(request: DownloadRequest):
             "file_size": None
         }
         history_manager.add_entry(history_entry)
+
+        # Register the callback
+        downloader.set_403_notification_callback(task_id, web_error_callback)
+
+        # Start download with pre-assigned task_id
+        actual_task_id = await downloader.download_video_with_id(request.url, task_id, request.format_id)
 
         # Estimate file size like in WeComService
         estimated_size = None
@@ -340,6 +340,80 @@ async def delete_history(task_id: str):
         return {"message": "History entry and file deleted"}
     else:
         raise HTTPException(status_code=404, detail="History entry not found")
+
+
+@app.post("/api/redownload/{task_id}")
+async def redownload_video(task_id: str):
+    """重新下载视频（删除原文件并重新下载）"""
+    # 查找原始下载记录
+    entry = history_manager.get_entry(task_id)
+
+    if not entry:
+        raise HTTPException(status_code=404, detail="Download record not found")
+
+    # 获取原始URL
+    original_url = entry.get('url')
+    if not original_url:
+        raise HTTPException(status_code=400, detail="Original URL not found in history")
+
+    # 删除原文件
+    if entry.get('file_path'):
+        file_path = entry['file_path']
+        # 如果是相对路径，转换为绝对路径
+        if not os.path.isabs(file_path):
+            file_path = os.path.join(os.path.dirname(__file__), file_path.lstrip('/'))
+
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+                print(f"Deleted old file for redownload: {file_path}")
+            except Exception as e:
+                print(f"Error deleting old file: {e}")
+
+    # 清理旧的下载任务
+    downloader.cleanup_task(task_id)
+
+    # 从历史中删除旧记录
+    history_manager.delete_entry(task_id)
+
+    # 开始新的下载
+    try:
+        # Generate new task_id
+        import uuid
+        new_task_id = str(uuid.uuid4())
+
+        # Get video info BEFORE starting download
+        info = await downloader.get_video_info(original_url)
+
+        # Add to history with correct info
+        history_entry = {
+            "id": new_task_id,
+            "url": original_url,
+            "title": info.get("title", "Unknown"),
+            "thumbnail": info.get("thumbnail"),
+            "uploader": info.get("uploader"),
+            "downloaded_at": datetime.now().isoformat(),
+            "status": "downloading",
+            "file_path": None,
+            "file_size": None
+        }
+        history_manager.add_entry(history_entry)
+
+        # Start download with new task_id
+        actual_task_id = await downloader.download_video_with_id(original_url, new_task_id)
+
+        # Start monitoring task for completion
+        import asyncio
+        asyncio.create_task(monitor_web_download(
+            task_id=new_task_id,
+            title=info.get("title", "Unknown"),
+            url=original_url,
+            video_info=info
+        ))
+
+        return {"task_id": new_task_id, "message": "Redownload started", "original_task_id": task_id}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/api/proxy-thumbnail")
@@ -619,8 +693,10 @@ async def refresh_browser_cookies():
 async def update_config(updates: dict):
     """更新配置"""
     if config.update_config(updates):
-        # 更新downloader的config
-        downloader.config = Config()
+        # 不要重新加载配置，直接使用更新后的配置
+        downloader.config = config
+        # 更新转码器配置
+        downloader.transcoder.config = config.config
         return {"message": "Config updated successfully"}
     else:
         raise HTTPException(status_code=500, detail="Failed to update config")
@@ -683,12 +759,25 @@ async def monitor_web_download(task_id: str, title: str, url: str, video_info: d
                     except:
                         pass
 
-                # Update history
-                history_manager.update_entry(task_id, {
-                    "status": "completed",
-                    "file_path": filepath,
-                    "file_size": video_info.get('filesize')
-                })
+                # Get actual video info from downloader if available
+                if status.get('video_info'):
+                    actual_info = status.get('video_info')
+                    # Update with real title and info from download
+                    history_manager.update_entry(task_id, {
+                        "status": "completed",
+                        "title": actual_info.get('title', title),
+                        "thumbnail": actual_info.get('thumbnail'),
+                        "uploader": actual_info.get('uploader'),
+                        "file_path": filepath,
+                        "file_size": actual_info.get('filesize') or video_info.get('filesize')
+                    })
+                else:
+                    # Fallback to original update
+                    history_manager.update_entry(task_id, {
+                        "status": "completed",
+                        "file_path": filepath,
+                        "file_size": video_info.get('filesize')
+                    })
 
                 # Generate download link for admins
                 wecom_config = config.get_wecom_config()

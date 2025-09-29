@@ -192,6 +192,16 @@ body {
     background: #f3f4f6;
 }
 
+.btn-warning {
+    background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    color: white;
+}
+
+.btn-warning:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(245, 158, 11, 0.4);
+}
+
 .btn-large {
     width: 100%;
     padding: 16px 32px;
@@ -545,6 +555,16 @@ body {
 .status-downloading {
     background: #dbeafe;
     color: #1e40af;
+}
+
+.status-processing {
+    background: #fef3c7;
+    color: #92400e;
+}
+
+.status-transcoding {
+    background: #e9d5ff;
+    color: #6b21a8;
 }
 
 .status-error {

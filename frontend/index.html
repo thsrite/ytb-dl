@@ -141,6 +141,9 @@
                             <button id="save-file-btn" class="btn btn-primary">
                                 💾 保存文件
                             </button>
+                            <button id="redownload-btn" class="btn btn-warning">
+                                🔁 重新下载
+                            </button>
                             <button id="new-download-btn" class="btn btn-outline">
                                 🔄 下载新视频
                             </button>
@@ -380,7 +383,68 @@
 
                     <div class="separator"></div>
 
-                    <!-- 企业微信配置 -->
+                    <!-- FFmpeg 转码设置 -->
+                    <div class="settings-section">
+                        <h3 class="settings-subtitle">FFmpeg 转码设置</h3>
+                        <p class="settings-description">配置视频下载后的自动转码选项</p>
+
+                        <div class="settings-grid">
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="ffmpeg-transcode-enabled">
+                                    启用自动转码
+                                </label>
+                            </div>
+                            <div class="settings-item">
+                                <label class="settings-label">
+                                    <input type="checkbox" id="ffmpeg-av1-only" checked>
+                                    仅转码AV1编码视频
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="settings-row">
+                            <div class="settings-col" style="grid-column: 1 / -1;">
+                                <label class="input-label">FFmpeg 转码命令</label>
+                                <textarea id="ffmpeg-command" class="textarea" rows="1"
+                                    placeholder='默认命令: -c:v libx264 -preset medium -crf 23 -c:a aac -b:a 192k'>-c:v libx264 -preset medium -crf 23 -c:a aac -b:a 192k</textarea>
+                                <small style="color: #888; display: block; margin-top: 5px;">
+                                    提示：支持硬件加速如 h264_qsv, h264_videotoolbox 等
+                                </small>
+                            </div>
+                        </div>
+
+                        <div class="settings-row">
+                            <div class="settings-col">
+                                <label class="input-label">硬件加速预设</label>
+                                <select id="ffmpeg-preset-select" class="select-small">
+                                    <option value="custom">自定义命令</option>
+                                    <option value="x264_high">H.264 高质量 (CPU)</option>
+                                    <option value="x264_medium">H.264 中等质量 (CPU)</option>
+                                    <option value="x264_fast">H.264 快速 (CPU)</option>
+                                    <option value="qsv_high">Intel QSV 高质量</option>
+                                    <option value="qsv_medium">Intel QSV 中等质量</option>
+                                    <option value="videotoolbox">macOS VideoToolbox</option>
+                                    <option value="nvenc_high">NVIDIA NVENC 高质量</option>
+                                    <option value="nvenc_medium">NVIDIA NVENC 中等质量</option>
+                                    <option value="vaapi">VAAPI (Linux)</option>
+                                </select>
+                            </div>
+                            <div class="settings-col">
+                                <label class="input-label">输出容器格式</label>
+                                <select id="ffmpeg-output-format" class="select-small">
+                                    <option value="mp4">MP4</option>
+                                    <option value="mkv">MKV</option>
+                                    <option value="webm">WebM</option>
+                                    <option value="mov">MOV</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="separator"></div>
+
+                    <!-- 企业微信集成 -->
                     <div class="settings-section">
                         <h3 class="settings-subtitle">企业微信集成</h3>
                         <p class="settings-description">配置企业微信自建应用的凭证与回调信息，方便通过企业微信触发下载。</p>

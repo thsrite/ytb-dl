@@ -7,6 +7,7 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from .config import Config
 from .browser_cookies import BrowserCookieExtractor
+from .transcoder import FFmpegTranscoder
 
 # Setup logger
 logger = logging.getLogger(__name__)
@@ -23,6 +24,8 @@ class YTDownloader:
         self.download_phases: Dict[str, Dict[str, Any]] = {}
         # Initialize browser cookie extractor
         self.cookie_extractor = BrowserCookieExtractor()
+        # Initialize transcoder with current config
+        self.transcoder = FFmpegTranscoder(self.config.config)
         # Track 403 errors for automatic retry
         self.error_counts: Dict[str, int] = {}
         # Store 403 notification callbacks per task
@@ -380,9 +383,6 @@ class YTDownloader:
         # Build and log the equivalent yt-dlp command
         command_parts = ['yt-dlp']
 
-        # Add URL
-        command_parts.append(f'"{url}"')
-
         # Check if custom params are configured
         custom_params = self.config.config.get('custom_params', [])
 
@@ -427,6 +427,9 @@ class YTDownloader:
             if ydl_opts.get('geo_bypass'):
                 command_parts.append('--geo-bypass')
 
+        # Add URL at the end
+        command_parts.append(f'"{url}"')
+
         # Log the command
         command_str = ' '.join(command_parts)
         logger.info(f"Starting download with task_id: {task_id}")
@@ -444,15 +447,24 @@ class YTDownloader:
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     info = ydl.extract_info(url, download=True)
                     filename = ydl.prepare_filename(info)
+
+                    # Save video info to active downloads
+                    self.active_downloads[task_id]['video_info'] = {
+                        'title': info.get('title', 'Unknown'),
+                        'thumbnail': info.get('thumbnail'),
+                        'uploader': info.get('uploader'),
+                        'duration': info.get('duration'),
+                        'filesize': info.get('filesize')
+                    }
+
                     # Handle merged file extension
                     if not filename.endswith('.mp4'):
                         base_name = os.path.splitext(filename)[0]
                         if os.path.exists(f"{base_name}.mp4"):
                             filename = f"{base_name}.mp4"
 
-                    self.active_downloads[task_id]['status'] = 'completed'
-                    self.active_downloads[task_id]['filename'] = os.path.basename(filename)
-                    self.active_downloads[task_id]['filepath'] = os.path.abspath(filename)
+                    # Finalize download with optional transcoding
+                    self._finalize_download(task_id, filename, url)
                     return task_id
             except Exception as e:
                 error_msg = str(e)
@@ -505,9 +517,8 @@ class YTDownloader:
                                     if os.path.exists(f"{base_name}.mp4"):
                                         filename = f"{base_name}.mp4"
 
-                                self.active_downloads[task_id]['status'] = 'completed'
-                                self.active_downloads[task_id]['filename'] = os.path.basename(filename)
-                                self.active_downloads[task_id]['filepath'] = os.path.abspath(filename)
+                                # Finalize with optional transcoding
+                                self._finalize_download(task_id, filename, url)
                                 print(f"✅ Task {task_id} completed after network error retry")
 
                                 # Send success notification
@@ -620,9 +631,8 @@ class YTDownloader:
                                     if os.path.exists(f"{base_name}.mp4"):
                                         filename = f"{base_name}.mp4"
 
-                                self.active_downloads[task_id]['status'] = 'completed'
-                                self.active_downloads[task_id]['filename'] = os.path.basename(filename)
-                                self.active_downloads[task_id]['filepath'] = os.path.abspath(filename)
+                                # Finalize with optional transcoding
+                                self._finalize_download(task_id, filename, url)
                                 print(f"✅ Task {task_id} completed after cookie refresh retry")
 
                                 return task_id
@@ -684,9 +694,8 @@ class YTDownloader:
                                 info = ydl_fallback.extract_info(url, download=True)
                                 filename = ydl_fallback.prepare_filename(info)
 
-                                self.active_downloads[task_id]['status'] = 'completed'
-                                self.active_downloads[task_id]['filename'] = os.path.basename(filename)
-                                self.active_downloads[task_id]['filepath'] = os.path.abspath(filename)
+                                # Finalize with optional transcoding
+                                self._finalize_download(task_id, filename, url)
                                 print(f"Fallback successful with format '{fallback_format}'")
                                 return task_id
                         except Exception as e2:
@@ -777,6 +786,108 @@ class YTDownloader:
             # Call the same callback but with network-specific status
             await callback(task_id, url, f"[网络错误] {status}", retry_count, final, success)
         # Otherwise, no notification (for non-WeChat downloads)
+
+    def _finalize_download(self, task_id: str, filename: str, url: str):
+        """Finalize download with optional transcoding"""
+        filepath = os.path.abspath(filename)
+
+        logger.info(f"Finalizing download for task {task_id}, file: {filepath}")
+        print(f"🔍 Checking if transcoding is needed for: {filepath}")
+
+        # Update transcoder config before checking
+        self.transcoder.config = self.config.config
+        ffmpeg_config = self.config.config.get('ffmpeg', {})
+        print(f"📋 FFmpeg config: enabled={ffmpeg_config.get('enabled')}, av1_only={ffmpeg_config.get('av1_only')}")
+
+        # Check if transcoding is needed
+        if self.transcoder.should_transcode(filepath):
+            logger.info(f"Transcoding needed for task {task_id}")
+            print(f"🎬 Transcoding needed for task {task_id}")
+            import asyncio
+            new_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(new_loop)
+            try:
+                # Transcoding will update the status internally
+                transcoded_file = new_loop.run_until_complete(
+                    self._handle_transcoding(task_id, filepath, url)
+                )
+                # The status and filepath have been updated by _handle_transcoding
+                return transcoded_file if transcoded_file else filepath
+            finally:
+                new_loop.close()
+        else:
+            # No transcoding needed, mark as completed
+            self.active_downloads[task_id]['status'] = 'completed'
+            self.active_downloads[task_id]['filename'] = os.path.basename(filename)
+            self.active_downloads[task_id]['filepath'] = filepath
+            return filepath
+
+    async def _handle_transcoding(self, task_id: str, filepath: str, url: str) -> Optional[str]:
+        """Handle post-download transcoding if needed"""
+        try:
+            # Update transcoder config
+            self.transcoder.config = self.config.config
+
+            # Check if transcoding is enabled and needed
+            if not self.transcoder.should_transcode(filepath):
+                return None
+
+            logger.info(f"Starting transcode for task {task_id}")
+            print(f"🎬 Starting video transcoding for task {task_id}...")
+
+            # Update status to transcoding
+            self.active_downloads[task_id]['status'] = 'transcoding'
+            self.active_downloads[task_id]['progress'] = {
+                'status': 'transcoding',
+                'percent': 0,
+                'phase': 'transcoding'
+            }
+
+            # Define progress callback
+            async def transcode_progress(t_id: str, status: str, progress: float):
+                if t_id == task_id:
+                    self.active_downloads[task_id]['progress'] = {
+                        'status': status,
+                        'percent': progress,
+                        'phase': 'transcoding'
+                    }
+                    # Keep status as transcoding during the process
+                    self.active_downloads[task_id]['status'] = 'transcoding'
+
+            # Run transcoding
+            result = await self.transcoder.transcode_video(
+                task_id=task_id,
+                input_file=filepath,
+                progress_callback=transcode_progress
+            )
+
+            if result:
+                logger.info(f"Transcoding completed for task {task_id}")
+                print(f"✅ Transcoding completed for task {task_id}")
+
+                # Update the task status with transcoded file
+                self.active_downloads[task_id]['status'] = 'completed'
+                self.active_downloads[task_id]['filename'] = os.path.basename(result)
+                self.active_downloads[task_id]['filepath'] = os.path.abspath(result)
+
+                return result
+            else:
+                logger.warning(f"Transcoding failed for task {task_id}, using original file")
+                print(f"⚠️ Transcoding failed, using original file")
+
+                # Reset status to completed with original file
+                self.active_downloads[task_id]['status'] = 'completed'
+
+                return None
+
+        except Exception as e:
+            logger.error(f"Error during transcoding: {e}")
+            print(f"❌ Transcoding error: {e}")
+
+            # Reset status to completed on error
+            self.active_downloads[task_id]['status'] = 'completed'
+
+            return None
 
     async def handle_403_error(self, task_id: str, url: str, format_id: Optional[str] = None) -> bool:
         """Handle 403 error by refreshing cookies and retrying"""

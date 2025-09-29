@@ -9,6 +9,9 @@ let currentTaskId = null;
 let progressInterval = null;
 let ws = null;
 
+// Store active download statuses for history display
+window.activeDownloadStatuses = {};
+
 // DOM Elements
 const elements = {
     // Tabs
@@ -48,6 +51,7 @@ const elements = {
     downloadFilename: document.getElementById('download-filename'),
     playVideoBtn: document.getElementById('play-video-btn'),
     saveFileBtn: document.getElementById('save-file-btn'),
+    redownloadBtn: document.getElementById('redownload-btn'),
     newDownloadBtn: document.getElementById('new-download-btn'),
 
     // History
@@ -75,6 +79,13 @@ const elements = {
 
     // Custom parameters
     customParams: document.getElementById('custom-params'),
+
+    // FFmpeg settings
+    ffmpegTranscodeEnabled: document.getElementById('ffmpeg-transcode-enabled'),
+    ffmpegAv1Only: document.getElementById('ffmpeg-av1-only'),
+    ffmpegCommand: document.getElementById('ffmpeg-command'),
+    ffmpegPresetSelect: document.getElementById('ffmpeg-preset-select'),
+    ffmpegOutputFormat: document.getElementById('ffmpeg-output-format'),
 
     // WeCom settings
     wecomCorpId: document.getElementById('wecom-corp-id'),
@@ -160,12 +171,18 @@ function initEventListeners() {
     elements.downloadBtn.addEventListener('click', startDownload);
     elements.playVideoBtn.addEventListener('click', playCurrentVideo);
     elements.saveFileBtn.addEventListener('click', saveFile);
+    elements.redownloadBtn.addEventListener('click', redownloadVideo);
     elements.newDownloadBtn.addEventListener('click', resetDownload);
 
     // Settings event listeners
     elements.saveCookiesBtn.addEventListener('click', saveCookies);
     elements.saveSettingsBtn.addEventListener('click', saveSettings);
     elements.resetSettingsBtn.addEventListener('click', resetSettings);
+
+    // FFmpeg preset select
+    if (elements.ffmpegPresetSelect) {
+        elements.ffmpegPresetSelect.addEventListener('change', handleFfmpegPresetChange);
+    }
 
     // Admin notification test button
     const testAdminNotifyBtn = document.getElementById('test-admin-notify-btn');
@@ -626,15 +643,28 @@ async function updateAllDownloadingTasks() {
 
     for (const item of downloadingItems) {
         const taskId = item.dataset.id;
-        const historyProgress = item.querySelector('.history-progress');
+        const statusElement = item.querySelector('.history-status');
 
-        // Only update items that have progress bars (downloading status)
-        if (!historyProgress || historyProgress.style.display === 'none') continue;
+        // Check if this item is actively downloading/processing/transcoding
+        if (!statusElement) continue;
+        const statusText = statusElement.textContent;
+        const isActive = statusText === '下载中' || statusText === '处理中' || statusText === '正在转码';
+
+        if (!isActive) continue;
 
         try {
             const response = await fetch(`${API_BASE_URL}/api/download-status/${taskId}`);
             if (response.ok) {
                 const status = await response.json();
+
+                // Store status for history rendering
+                if (status.status === 'downloading' || status.status === 'processing' || status.status === 'transcoding') {
+                    window.activeDownloadStatuses[taskId] = status;
+                } else {
+                    // Remove from active statuses when completed or error
+                    delete window.activeDownloadStatuses[taskId];
+                }
+
                 updateHistoryProgress(taskId, status);
 
                 // If this task just completed, we'll refresh history to show final state
@@ -667,6 +697,9 @@ function updateProgress(status) {
             case 'merging':
                 elements.progressStatus.textContent = '正在合并音视频...';
                 break;
+            case 'transcoding':
+                elements.progressStatus.textContent = '正在转码视频...';
+                break;
             case 'completed':
                 elements.progressStatus.textContent = '下载完成!';
                 break;
@@ -677,6 +710,7 @@ function updateProgress(status) {
 
     switch (status.status) {
         case 'downloading':
+        case 'transcoding':
             // Update download statistics
             if (status.speed) {
                 elements.downloadSpeed.textContent = status.speed;
@@ -775,8 +809,15 @@ function updateHistoryProgress(taskId, status) {
         return;
     }
 
-    if (status.status === 'downloading' || status.status === 'processing') {
+    if (status.status === 'downloading' || status.status === 'processing' || status.status === 'transcoding') {
         historyProgress.style.display = 'block';
+
+        // Update main status text for transcoding
+        const statusElement = historyItem.querySelector('.history-status');
+        if (statusElement && status.status === 'transcoding') {
+            statusElement.textContent = '正在转码';
+            statusElement.className = 'history-status status-transcoding';
+        }
     }
 
     const progress = Math.round(status.progress || 0);
@@ -790,22 +831,26 @@ function updateHistoryProgress(taskId, status) {
     if (progressFill) progressFill.style.width = `${progress}%`;
 
     // Update status text based on phase
-    if (progressStatus && status.phase) {
-        switch (status.phase) {
-            case 'downloading_video':
-                progressStatus.textContent = '下载视频中...';
-                break;
-            case 'downloading_audio':
-                progressStatus.textContent = '下载音频中...';
-                break;
-            case 'merging':
-                progressStatus.textContent = '合并中...';
-                break;
-            case 'completed':
-                progressStatus.textContent = '完成!';
-                break;
-            default:
-                progressStatus.textContent = '下载中...';
+    if (progressStatus) {
+        if (status.status === 'transcoding' || status.phase === 'transcoding') {
+            progressStatus.textContent = '正在转码视频...';
+        } else if (status.phase) {
+            switch (status.phase) {
+                case 'downloading_video':
+                    progressStatus.textContent = '下载视频中...';
+                    break;
+                case 'downloading_audio':
+                    progressStatus.textContent = '下载音频中...';
+                    break;
+                case 'merging':
+                    progressStatus.textContent = '合并中...';
+                    break;
+                case 'completed':
+                    progressStatus.textContent = '完成!';
+                    break;
+                default:
+                    progressStatus.textContent = '下载中...';
+            }
         }
     }
 
@@ -913,6 +958,45 @@ async function saveFile() {
     }
 }
 
+// Redownload Video
+async function redownloadVideo() {
+    if (!currentTaskId) return;
+
+    const confirmed = confirm('确定要重新下载吗？这将删除已下载的文件。');
+    if (!confirmed) return;
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/redownload/${currentTaskId}`, {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const result = await response.json();
+
+        // Update current task ID to the new one
+        const newTaskId = result.task_id;
+        currentTaskId = newTaskId;
+
+        // Reset UI to show download progress
+        resetDownloadUI();
+        elements.downloadBtn.classList.add('hidden');
+        elements.downloadProgress.classList.remove('hidden');
+        elements.progressStatus.textContent = '正在重新下载...';
+        elements.progressPercent.textContent = '0%';
+        elements.progressFill.style.width = '0%';
+
+        // Start monitoring progress with new task ID
+        startProgressMonitoring();
+
+    } catch (error) {
+        console.error('Error redownloading:', error);
+        alert('重新下载失败: ' + error.message);
+    }
+}
+
 // Reset Download
 function resetDownload() {
     elements.videoUrl.value = '';
@@ -969,19 +1053,33 @@ function displayHistory(history) {
     const isMobile = window.innerWidth <= 768;
 
     const renderProgressSection = (item) => {
-        const isActive = item && (item.status === 'downloading' || item.status === 'processing');
-        const progressValue = Math.round(item?.progress || 0);
+        const isActive = item && (item.status === 'downloading' || item.status === 'processing' || item.status === 'transcoding');
+
+        // Try to get real-time progress from active downloads
+        let progressData = null;
+        if (isActive && window.activeDownloadStatuses && window.activeDownloadStatuses[item.id]) {
+            progressData = window.activeDownloadStatuses[item.id];
+        }
+
+        const progressValue = Math.round(progressData?.progress?.percent || item?.progress || 0);
+        const phase = progressData?.progress?.phase || item?.phase;
+
         const phaseMap = {
             downloading_video: '下载视频中...',
             downloading_audio: '下载音频中...',
-            merging: '合并中...'
+            merging: '合并中...',
+            transcoding: '正在转码视频...'
         };
-        const progressLabel = item?.phase ? (phaseMap[item.phase] || '下载中...')
+
+        const progressLabel = phase ? (phaseMap[phase] || '下载中...')
             : item?.status === 'processing'
                 ? '处理中...'
-                : '下载中...';
+                : item?.status === 'transcoding'
+                    ? '正在转码视频...'
+                    : '下载中...';
 
-        const etaText = item && item.eta ? formatEtaValue(item.eta) : '--';
+        const etaText = progressData?.progress?.eta ? formatEtaValue(progressData.progress.eta) : '--';
+        const speed = progressData?.progress?.speed || item?.speed || '--';
 
         return `
             <div class="history-progress" style="display: ${isActive ? 'block' : 'none'};">
@@ -995,7 +1093,7 @@ function displayHistory(history) {
                 <div class="download-stats">
                     <div class="stat-item">
                         <span class="stat-label">速度</span>
-                        <span class="stat-value download-speed">${item?.speed || '--'}</span>
+                        <span class="stat-value download-speed">${speed}</span>
                     </div>
                     <div class="stat-item">
                         <span class="stat-label">已下载</span>
@@ -1264,6 +1362,7 @@ function getStatusText(status) {
         'completed': '已完成',
         'downloading': '下载中',
         'processing': '处理中',
+        'transcoding': '正在转码',
         'error': '失败'
     };
     return statusMap[status] || status;
@@ -1414,6 +1513,25 @@ async function loadSettings() {
             elements.customParams.value = config.custom_params.join('\n');
         }
 
+        // Load FFmpeg settings
+        if (config.ffmpeg) {
+            if (elements.ffmpegTranscodeEnabled) {
+                elements.ffmpegTranscodeEnabled.checked = config.ffmpeg.enabled || false;
+            }
+            if (elements.ffmpegAv1Only) {
+                elements.ffmpegAv1Only.checked = config.ffmpeg.av1_only !== false;
+            }
+            if (elements.ffmpegPresetSelect) {
+                elements.ffmpegPresetSelect.value = config.ffmpeg.hardware_preset || 'custom';
+            }
+            if (elements.ffmpegCommand) {
+                elements.ffmpegCommand.value = config.ffmpeg.command || '-c:v libx264 -preset medium -crf 23 -c:a aac -b:a 192k';
+            }
+            if (elements.ffmpegOutputFormat) {
+                elements.ffmpegOutputFormat.value = config.ffmpeg.output_format || 'mp4';
+            }
+        }
+
         // Load cookies and update status
         await updateCookiesStatus();
 
@@ -1463,6 +1581,26 @@ async function saveCookies() {
     }
 }
 
+// Handle FFmpeg preset change
+function handleFfmpegPresetChange() {
+    const preset = elements.ffmpegPresetSelect.value;
+    const presets = {
+        'x264_high': '-c:v libx264 -preset slow -crf 18 -c:a aac -b:a 256k',
+        'x264_medium': '-c:v libx264 -preset medium -crf 23 -c:a aac -b:a 192k',
+        'x264_fast': '-c:v libx264 -preset fast -crf 28 -c:a aac -b:a 128k',
+        'qsv_high': '-c:v h264_qsv -preset veryslow -global_quality 18 -look_ahead 1 -c:a aac -b:a 256k',
+        'qsv_medium': '-c:v h264_qsv -preset medium -global_quality 23 -c:a aac -b:a 192k',
+        'videotoolbox': '-c:v h264_videotoolbox -b:v 10M -c:a aac -b:a 256k',
+        'nvenc_high': '-c:v h264_nvenc -preset p7 -rc vbr -cq 18 -b:v 0 -c:a aac -b:a 256k',
+        'nvenc_medium': '-c:v h264_nvenc -preset p4 -rc vbr -cq 23 -b:v 0 -c:a aac -b:a 192k',
+        'vaapi': '-vaapi_device /dev/dri/renderD128 -vf format=nv12,hwupload -c:v h264_vaapi -b:v 10M -c:a aac -b:a 192k'
+    };
+
+    if (preset !== 'custom' && presets[preset]) {
+        elements.ffmpegCommand.value = presets[preset];
+    }
+}
+
 async function saveSettings() {
     // Parse custom parameters
     const customParamsText = elements.customParams.value.trim();
@@ -1494,6 +1632,24 @@ async function saveSettings() {
         }
     }
 
+    // Debug FFmpeg elements
+    console.log('FFmpeg elements:', {
+        enabled: elements.ffmpegTranscodeEnabled,
+        av1Only: elements.ffmpegAv1Only,
+        command: elements.ffmpegCommand,
+        outputFormat: elements.ffmpegOutputFormat
+    });
+
+    const ffmpegConfig = {
+        enabled: elements.ffmpegTranscodeEnabled ? elements.ffmpegTranscodeEnabled.checked : false,
+        av1_only: elements.ffmpegAv1Only ? elements.ffmpegAv1Only.checked : true,
+        hardware_preset: elements.ffmpegPresetSelect ? elements.ffmpegPresetSelect.value : 'custom',
+        command: elements.ffmpegCommand ? elements.ffmpegCommand.value.trim() : '-c:v libx264 -preset medium -crf 23 -c:a aac -b:a 192k',
+        output_format: elements.ffmpegOutputFormat ? elements.ffmpegOutputFormat.value : 'mp4'
+    };
+
+    console.log('FFmpeg config to save:', ffmpegConfig);
+
     const config = {
         proxy: elements.proxyInput.value.trim() || null,
         user_agent: elements.userAgentInput.value.trim(),
@@ -1507,6 +1663,7 @@ async function saveSettings() {
             fragment_retries: parseInt(elements.fragmentRetries.value)
         },
         custom_params: customParams,
+        ffmpeg: ffmpegConfig,
         wecom: {
             corp_id: corpId,
             agent_id: agentId,
@@ -1520,6 +1677,9 @@ async function saveSettings() {
             admin_users: adminUsers
         }
     };
+
+    console.log('Full config to send:', config);
+    console.log('Config stringified:', JSON.stringify(config, null, 2));
 
     try {
         const response = await fetch(`${API_BASE_URL}/api/config`, {

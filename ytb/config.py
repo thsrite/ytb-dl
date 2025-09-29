@@ -18,6 +18,7 @@ class Config:
         else:
             self.config_dir = os.path.dirname(config_file)
         self.config_file = config_file
+        print(f"[CONFIG] Using config file: {self.config_file}")
         self.default_config = {
             "cookies_file": None,
             "proxy": None,
@@ -39,6 +40,13 @@ class Config:
                 "skip_unavailable_fragments": True
             },
             "custom_params": [],  # 自定义参数列表
+            "ffmpeg": {
+                "enabled": False,
+                "av1_only": True,
+                "hardware_preset": "custom",  # custom, h264_qsv, h264_videotoolbox, h264_nvenc
+                "command": "-c:v libx264 -preset medium -crf 23 -c:a aac -b:a 192k",
+                "output_format": "mp4"
+            },
             "cookiecloud": {
                 "enabled": False,
                 "server_url": "",
@@ -69,7 +77,10 @@ class Config:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     loaded = json.load(f)
                     # 合并默认配置和加载的配置
-                    return self._deep_merge(self.default_config, loaded)
+                    merged = self._deep_merge(self.default_config, loaded)
+                    print(f"[CONFIG] Loaded config from {self.config_file}")
+                    print(f"[CONFIG] Config after load has ffmpeg: {'ffmpeg' in merged}")
+                    return merged
             except Exception as e:
                 print(f"Error loading config: {e}")
                 print("Falling back to default config")
@@ -83,17 +94,55 @@ class Config:
         """保存配置文件"""
         try:
             self._ensure_dir()
+            print(f"[CONFIG] Saving to file: {self.config_file}")
+            print(f"[CONFIG] Config to save has ffmpeg: {'ffmpeg' in self.config}")
+            if 'ffmpeg' in self.config:
+                print(f"[CONFIG] FFmpeg config: {self.config['ffmpeg']}")
+
             with open(self.config_file, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, indent=4, ensure_ascii=False)
+
+            # Verify the file was written
+            if os.path.exists(self.config_file):
+                file_size = os.path.getsize(self.config_file)
+                print(f"[CONFIG] File written successfully, size: {file_size} bytes")
+            else:
+                print(f"[CONFIG] WARNING: File doesn't exist after write!")
+
             return True
         except Exception as e:
             print(f"Error saving config: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     def update_config(self, updates: Dict[str, Any]) -> bool:
         """更新配置"""
+        import json
+        print(f"[CONFIG] Updating config with: {json.dumps(updates, indent=2)[:500]}...")
+
+        # 确保我们的配置包含所有默认字段
+        if 'ffmpeg' not in self.config:
+            self.config['ffmpeg'] = self.default_config['ffmpeg'].copy()
+
+        # 深度合并更新
         self.config = self._deep_merge(self.config, updates)
-        return self.save_config()
+        print(f"[CONFIG] Config after merge, ffmpeg section: {self.config.get('ffmpeg', 'NOT FOUND')}")
+
+        # 保存配置
+        result = self.save_config()
+        print(f"[CONFIG] Save result: {result}, config file: {self.config_file}")
+
+        # Verify file was actually written
+        try:
+            with open(self.config_file, 'r') as f:
+                saved_config = json.load(f)
+                print(f"[CONFIG] Verified saved config has ffmpeg: {'ffmpeg' in saved_config}")
+                if 'ffmpeg' in saved_config:
+                    print(f"[CONFIG] FFmpeg config in file: {saved_config['ffmpeg']}")
+        except Exception as e:
+            print(f"[CONFIG] Error verifying saved config: {e}")
+        return result
 
     def get_cookiecloud_config(self) -> Dict[str, Any]:
         """Return the current CookieCloud configuration block."""
