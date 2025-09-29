@@ -843,13 +843,21 @@ class YTDownloader:
                 'phase': 'transcoding'
             }
 
+            # Also update history database to persist transcoding status
+            from ytb.history_manager import HistoryManager
+            history_manager = HistoryManager()
+            history_manager.update_entry(task_id, {'status': 'transcoding'})
+
             # Define progress callback
-            async def transcode_progress(t_id: str, status: str, progress: float):
+            async def transcode_progress(t_id: str, status: str, progress: float, current_time: float = 0, total_time: float = 0, eta: float = None):
                 if t_id == task_id:
                     self.active_downloads[task_id]['progress'] = {
                         'status': status,
                         'percent': progress,
-                        'phase': 'transcoding'
+                        'phase': 'transcoding',
+                        'current_time': current_time,
+                        'total_time': total_time,
+                        'eta': eta  # Add ETA to progress info
                     }
                     # Keep status as transcoding during the process
                     self.active_downloads[task_id]['status'] = 'transcoding'

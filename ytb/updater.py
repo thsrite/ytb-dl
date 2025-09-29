@@ -2,6 +2,7 @@ import subprocess
 import sys
 import json
 import logging
+import os
 from typing import Dict, Any, Optional
 import httpx
 import yt_dlp
@@ -65,13 +66,25 @@ class YtDlpUpdater:
     def update_yt_dlp(self) -> Dict[str, Any]:
         """Update yt-dlp to the latest version"""
         try:
-            # Use pip to update yt-dlp
-            result = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"],
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
+            # Check if running in Docker
+            is_docker = os.path.exists("/app")
+
+            if is_docker:
+                # In Docker, try with --user flag for user-level installation
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "--upgrade", "--user", "yt-dlp"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+            else:
+                # Normal pip upgrade
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "--upgrade", "yt-dlp"],
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
 
             if result.returncode == 0:
                 # Reload the module to get the new version
@@ -87,11 +100,19 @@ class YtDlpUpdater:
                     "output": result.stdout
                 }
             else:
+                error_message = result.stderr
+                if is_docker:
+                    if "Permission denied" in error_message or "Read-only file system" in error_message:
+                        error_message += "\n\nNote: Docker container may have read-only file system. To update yt-dlp in Docker:\n1. Rebuild the Docker image with the latest yt-dlp\n2. Or mount a writable volume for Python packages"
+
+                logger.error(f"Failed to update yt-dlp: {error_message}")
+
                 return {
                     "success": False,
                     "message": "Failed to update yt-dlp",
-                    "error": result.stderr,
-                    "output": result.stdout
+                    "error": error_message,
+                    "output": result.stdout,
+                    "is_docker": is_docker
                 }
 
         except subprocess.TimeoutExpired:

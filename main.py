@@ -287,7 +287,9 @@ async def get_download_status(task_id: str):
         "eta": progress_info.get('eta'),
         "filename": status.get('filename'),
         "message": status.get('error') if status.get('status') == 'error' else None,
-        "phase": progress_info.get('phase', 'downloading')  # Add phase info
+        "phase": progress_info.get('phase', 'downloading'),  # Add phase info
+        "current_time": progress_info.get('current_time'),  # Add transcoding current time
+        "total_time": progress_info.get('total_time')  # Add transcoding total time
     }
 
     # Update history if completed or error
@@ -317,6 +319,14 @@ async def delete_history(task_id: str):
     entry_to_delete = history_manager.get_entry(task_id)
 
     if entry_to_delete:
+        # Check if task is currently transcoding and cancel it
+        status = downloader.get_download_status(task_id)
+        if status and (status.get('status') == 'transcoding' or
+                      (status.get('progress', {}).get('phase') == 'transcoding')):
+            # Cancel the transcoding process and delete original file
+            print(f"Cancelling active transcoding for task {task_id}")
+            await downloader.transcoder.cancel_transcode(task_id, delete_input=True)
+
         # 删除文件
         if entry_to_delete.get('file_path'):
             file_path = entry_to_delete['file_path']

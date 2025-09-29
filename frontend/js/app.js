@@ -43,6 +43,7 @@ const elements = {
     progressStatus: document.getElementById('progress-status'),
     progressPercent: document.getElementById('progress-percent'),
     progressFill: document.getElementById('progress-fill'),
+    speedLabel: document.getElementById('speed-label'),
     downloadSpeed: document.getElementById('download-speed'),
     downloadSize: document.getElementById('download-size'),
     totalSize: document.getElementById('total-size'),
@@ -624,6 +625,14 @@ function startProgressPolling() {
                         progressInterval = null;
                         return;
                     }
+                } else if (response.status === 404) {
+                    // Task not found - stop polling for this task
+                    console.log(`Task ${currentTaskId} not found, stopping progress polling`);
+                    clearInterval(progressInterval);
+                    progressInterval = null;
+                    currentTaskId = null;
+                    resetDownloadUI();
+                    return;
                 }
             }
 
@@ -642,13 +651,19 @@ async function updateAllDownloadingTasks() {
     const downloadingItems = document.querySelectorAll('.history-item[data-id]');
 
     for (const item of downloadingItems) {
+        // Skip if this task was already marked as deleted
+        if (item.dataset.deleted === 'true') continue;
+
         const taskId = item.dataset.id;
         const statusElement = item.querySelector('.history-status');
 
         // Check if this item is actively downloading/processing/transcoding
         if (!statusElement) continue;
-        const statusText = statusElement.textContent;
-        const isActive = statusText === '下载中' || statusText === '处理中' || statusText === '正在转码';
+        const statusText = statusElement.textContent.trim();
+        // Also check the class name as a fallback
+        const statusClass = statusElement.className;
+        const isActive = statusText === '下载中' || statusText === '处理中' || statusText === '正在转码' ||
+                        statusClass.includes('status-downloading') || statusClass.includes('status-processing') || statusClass.includes('status-transcoding');
 
         if (!isActive) continue;
 
@@ -671,6 +686,25 @@ async function updateAllDownloadingTasks() {
                 if (status.status === 'completed' || status.status === 'error') {
                     setTimeout(() => loadHistory(), 1000);
                 }
+            } else if (response.status === 404) {
+                // Task not found - stop polling this task
+                console.log(`Task ${taskId} not found, stopping progress polling`);
+                delete window.activeDownloadStatuses[taskId];
+                // Update UI to show task is no longer active
+                if (statusElement) {
+                    // Change status to completed or error to prevent further polling
+                    statusElement.textContent = '已删除';
+                    statusElement.className = 'history-status status-deleted';
+                    // Remove active status classes to stop polling
+                    statusElement.classList.remove('status-downloading', 'status-processing', 'status-transcoding');
+                }
+                // Hide progress bar
+                const progressBar = item.querySelector('.history-progress');
+                if (progressBar) {
+                    progressBar.style.display = 'none';
+                }
+                // Mark this task as handled to prevent further requests
+                item.dataset.deleted = 'true';
             }
         } catch (error) {
             console.error(`Error updating progress for task ${taskId}:`, error);
@@ -699,6 +733,11 @@ function updateProgress(status) {
                 break;
             case 'transcoding':
                 elements.progressStatus.textContent = '正在转码视频...';
+                // Show transcoding time in speed field
+                if (status.current_time && status.total_time) {
+                    elements.downloadSpeed.textContent = `${formatTimeSeconds(status.current_time)} / ${formatTimeSeconds(status.total_time)}`;
+                    elements.speedLabel.textContent = '已转时间';
+                }
                 break;
             case 'completed':
                 elements.progressStatus.textContent = '下载完成!';
@@ -712,10 +751,14 @@ function updateProgress(status) {
         case 'downloading':
         case 'transcoding':
             // Update download statistics
-            if (status.speed) {
-                elements.downloadSpeed.textContent = status.speed;
-            } else {
-                elements.downloadSpeed.textContent = '--';
+            // Don't override speed field if we're transcoding and already showing time
+            if (!(status.phase === 'transcoding' && status.current_time !== undefined && status.total_time !== undefined)) {
+                if (status.speed) {
+                    elements.downloadSpeed.textContent = status.speed;
+                    if (elements.speedLabel) elements.speedLabel.textContent = '速度';
+                } else {
+                    elements.downloadSpeed.textContent = '--';
+                }
             }
 
             if (status.downloaded_size) {
@@ -732,14 +775,14 @@ function updateProgress(status) {
 
             if (status.eta) {
                 // Format ETA to readable format
-                const eta = status.eta;
+                const eta = Math.floor(status.eta);  // Remove decimals
                 if (eta > 3600) {
                     const hours = Math.floor(eta / 3600);
                     const minutes = Math.floor((eta % 3600) / 60);
                     elements.downloadEta.textContent = `${hours}小时${minutes}分钟`;
                 } else if (eta > 60) {
                     const minutes = Math.floor(eta / 60);
-                    const seconds = eta % 60;
+                    const seconds = Math.floor(eta % 60);
                     elements.downloadEta.textContent = `${minutes}分${seconds}秒`;
                 } else {
                     elements.downloadEta.textContent = `${eta}秒`;
@@ -860,8 +903,24 @@ function updateHistoryProgress(taskId, status) {
     const totalSize = historyProgress.querySelector('.total-size');
     const downloadEta = historyProgress.querySelector('.download-eta');
 
+    // Get the label element for speed/time
+    const speedLabelEl = historyProgress.querySelector('.stat-item:first-child .stat-label');
+
     if (downloadSpeed) {
-        downloadSpeed.textContent = status.speed || '--';
+        // For transcoding, show time instead of speed
+        if ((status.status === 'transcoding' || status.phase === 'transcoding') && status.current_time !== undefined && status.total_time !== undefined) {
+            downloadSpeed.textContent = `${formatTimeSeconds(status.current_time)} / ${formatTimeSeconds(status.total_time)}`;
+            // Update the label to show "已转时间"
+            if (speedLabelEl) {
+                speedLabelEl.textContent = '已转时间';
+            }
+        } else {
+            downloadSpeed.textContent = status.speed || '--';
+            // Reset label back to "速度"
+            if (speedLabelEl) {
+                speedLabelEl.textContent = '速度';
+            }
+        }
     }
 
     if (downloadSize) {
@@ -872,21 +931,43 @@ function updateHistoryProgress(taskId, status) {
         totalSize.textContent = status.total_size || '--';
     }
 
-    if (downloadEta && status.eta) {
-        const eta = status.eta;
-        if (eta > 3600) {
-            const hours = Math.floor(eta / 3600);
-            const minutes = Math.floor((eta % 3600) / 60);
-            downloadEta.textContent = `${hours}时${minutes}分`;
-        } else if (eta > 60) {
-            const minutes = Math.floor(eta / 60);
-            const seconds = eta % 60;
-            downloadEta.textContent = `${minutes}分${seconds}秒`;
+    if (downloadEta) {
+        // For transcoding, calculate or use provided ETA
+        if ((status.status === 'transcoding' || status.phase === 'transcoding') && status.current_time !== undefined && status.total_time !== undefined) {
+            if (status.eta) {
+                // Use backend-provided ETA for transcoding
+                const eta = Math.floor(status.eta);
+                if (eta > 3600) {
+                    const hours = Math.floor(eta / 3600);
+                    const minutes = Math.floor((eta % 3600) / 60);
+                    downloadEta.textContent = `${hours}时${minutes}分`;
+                } else if (eta > 60) {
+                    const minutes = Math.floor(eta / 60);
+                    const seconds = eta % 60;
+                    downloadEta.textContent = `${minutes}分${seconds}秒`;
+                } else {
+                    downloadEta.textContent = `${eta}秒`;
+                }
+            } else {
+                downloadEta.textContent = '--';
+            }
+        } else if (status.eta) {
+            // Normal download ETA
+            const eta = status.eta;
+            if (eta > 3600) {
+                const hours = Math.floor(eta / 3600);
+                const minutes = Math.floor((eta % 3600) / 60);
+                downloadEta.textContent = `${hours}时${minutes}分`;
+            } else if (eta > 60) {
+                const minutes = Math.floor(eta / 60);
+                const seconds = eta % 60;
+                downloadEta.textContent = `${minutes}分${seconds}秒`;
+            } else {
+                downloadEta.textContent = `${eta}秒`;
+            }
         } else {
-            downloadEta.textContent = `${eta}秒`;
+            downloadEta.textContent = '--';
         }
-    } else if (downloadEta) {
-        downloadEta.textContent = '--';
     }
 }
 
@@ -966,7 +1047,10 @@ async function redownloadVideo() {
     if (!confirmed) return;
 
     try {
-        const response = await fetch(`${API_BASE_URL}/api/redownload/${currentTaskId}`, {
+        // Store original task ID for API call
+        const originalTaskId = currentTaskId;
+
+        const response = await fetch(`${API_BASE_URL}/api/redownload/${originalTaskId}`, {
             method: 'POST'
         });
 
@@ -979,6 +1063,7 @@ async function redownloadVideo() {
         // Update current task ID to the new one
         const newTaskId = result.task_id;
         currentTaskId = newTaskId;
+        console.log(`Redownload started: original task ${originalTaskId} -> new task ${newTaskId}`);
 
         // Reset UI to show download progress
         resetDownloadUI();
@@ -989,7 +1074,7 @@ async function redownloadVideo() {
         elements.progressFill.style.width = '0%';
 
         // Start monitoring progress with new task ID
-        startProgressMonitoring();
+        startProgressPolling();
 
     } catch (error) {
         console.error('Error redownloading:', error);
@@ -1078,8 +1163,27 @@ function displayHistory(history) {
                     ? '正在转码视频...'
                     : '下载中...';
 
-        const etaText = progressData?.progress?.eta ? formatEtaValue(progressData.progress.eta) : '--';
-        const speed = progressData?.progress?.speed || item?.speed || '--';
+        // For transcoding, show current/total time instead of ETA
+        let etaText = '--';
+        let speedText = '--';
+
+        if (item?.status === 'transcoding' || phase === 'transcoding') {
+            const currentTime = progressData?.progress?.current_time || 0;
+            const totalTime = progressData?.progress?.total_time || 0;
+            if (totalTime > 0) {
+                speedText = `${formatTimeSeconds(currentTime)} / ${formatTimeSeconds(totalTime)}`;
+            }
+            // Use ETA from backend if available, otherwise calculate
+            if (progressData?.progress?.eta) {
+                etaText = formatEtaValue(progressData.progress.eta);
+            } else if (currentTime > 0 && progressValue > 0) {
+                const remainingTime = (totalTime - currentTime) * (100 - progressValue) / progressValue;
+                etaText = formatEtaValue(remainingTime);
+            }
+        } else {
+            etaText = progressData?.progress?.eta ? formatEtaValue(progressData.progress.eta) : '--';
+            speedText = progressData?.progress?.speed || item?.speed || '--';
+        }
 
         return `
             <div class="history-progress" style="display: ${isActive ? 'block' : 'none'};">
@@ -1092,8 +1196,8 @@ function displayHistory(history) {
                 </div>
                 <div class="download-stats">
                     <div class="stat-item">
-                        <span class="stat-label">速度</span>
-                        <span class="stat-value download-speed">${speed}</span>
+                        <span class="stat-label">${(item?.status === 'transcoding' || phase === 'transcoding') ? '时间' : '速度'}</span>
+                        <span class="stat-value download-speed">${speedText}</span>
                     </div>
                     <div class="stat-item">
                         <span class="stat-label">已下载</span>
@@ -1383,6 +1487,19 @@ function formatEtaValue(eta) {
         return `${minutes}分${secs}秒`;
     }
     return `${seconds}秒`;
+}
+
+function formatTimeSeconds(seconds) {
+    if (!seconds || seconds <= 0) return '00:00';
+
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    if (hours > 0) {
+        return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${secs.toString().padStart(2, '0')}`;
 }
 
 // Update cookies status display

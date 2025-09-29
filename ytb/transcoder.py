@@ -24,29 +24,6 @@ class FFmpegTranscoder:
     def detect_video_codec(self, filepath: str) -> Optional[str]:
         """Detect video codec using ffmpeg"""
         try:
-            # Use ffprobe if available, otherwise ffmpeg
-            # Try ffprobe first (faster and more reliable)
-            try:
-                cmd = [
-                    'ffprobe',
-                    '-v', 'error',
-                    '-select_streams', 'v:0',
-                    '-show_entries', 'stream=codec_name',
-                    '-of', 'default=noprint_wrappers=1:nokey=1',
-                    filepath
-                ]
-                logger.info(f"Running ffprobe to detect codec for: {filepath}")
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                if result.returncode == 0 and result.stdout.strip():
-                    codec = result.stdout.strip()
-                    logger.info(f"Detected video codec using ffprobe: {codec}")
-                    return codec
-            except FileNotFoundError:
-                logger.info("ffprobe not found, falling back to ffmpeg")
-            except subprocess.TimeoutExpired:
-                logger.warning("ffprobe timed out, falling back to ffmpeg")
-
-            # Fallback to ffmpeg
             cmd = [
                 'ffmpeg',
                 '-i', filepath,
@@ -187,11 +164,14 @@ class FFmpegTranscoder:
         logger.info(f"Starting transcode: {' '.join(cmd)}")
 
         # Initialize transcode tracking
+        import time
         self.active_transcodes[task_id] = {
             'status': 'transcoding',
             'progress': 0,
             'input_file': input_file,
-            'output_file': output_file
+            'output_file': output_file,
+            'start_time': time.time(),  # Record start time for ETA calculation
+            'process': None  # Will store the FFmpeg process
         }
 
         try:
@@ -204,6 +184,9 @@ class FFmpegTranscoder:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
+
+            # Store the process so we can kill it if needed
+            self.active_transcodes[task_id]['process'] = process
 
             # Parse progress output
             while True:
@@ -222,9 +205,27 @@ class FFmpegTranscoder:
                         progress = min(100, (current_time / duration) * 100)
 
                         self.active_transcodes[task_id]['progress'] = progress
+                        self.active_transcodes[task_id]['current_time'] = current_time
+                        self.active_transcodes[task_id]['total_time'] = duration
+
+                        # Calculate ETA based on transcoding speed
+                        if current_time > 0 and progress > 0:
+                            # Estimate remaining time based on current progress rate
+                            remaining_time = duration - current_time
+                            # Calculate speed factor (how fast we're transcoding compared to real-time)
+                            elapsed_real_time = self.active_transcodes[task_id].get('start_time')
+                            if elapsed_real_time:
+                                import time
+                                real_elapsed = time.time() - elapsed_real_time
+                                if real_elapsed > 0:
+                                    speed_factor = current_time / real_elapsed
+                                    if speed_factor > 0:
+                                        eta = remaining_time / speed_factor
+                                        self.active_transcodes[task_id]['eta'] = eta
 
                         if progress_callback:
-                            await progress_callback(task_id, 'transcoding', progress)
+                            eta = self.active_transcodes[task_id].get('eta')
+                            await progress_callback(task_id, 'transcoding', progress, current_time, duration, eta)
 
             # Wait for process to complete
             await process.wait()
@@ -317,3 +318,53 @@ class FFmpegTranscoder:
         """Clean up completed transcode task"""
         if task_id in self.active_transcodes:
             del self.active_transcodes[task_id]
+
+    async def cancel_transcode(self, task_id: str, delete_input: bool = True) -> bool:
+        """Cancel an active transcoding task and kill the FFmpeg process
+
+        Args:
+            task_id: The task ID
+            delete_input: Whether to delete the input (original) file
+        """
+        if task_id not in self.active_transcodes:
+            logger.warning(f"No active transcode found for task {task_id}")
+            return False
+
+        transcode_info = self.active_transcodes[task_id]
+        process = transcode_info.get('process')
+        output_file = transcode_info.get('output_file')
+        input_file = transcode_info.get('input_file')
+
+        # Kill the FFmpeg process if it's running
+        if process and process.returncode is None:
+            logger.info(f"Killing FFmpeg process for task {task_id}")
+            try:
+                process.terminate()  # Try graceful termination first
+                await asyncio.sleep(0.5)  # Give it a moment
+                if process.returncode is None:
+                    process.kill()  # Force kill if still running
+                    await process.wait()  # Wait for process to die
+                logger.info(f"FFmpeg process killed for task {task_id}")
+            except Exception as e:
+                logger.error(f"Error killing FFmpeg process: {e}")
+
+        # Clean up the partial output file
+        if output_file and os.path.exists(output_file):
+            try:
+                os.remove(output_file)
+                logger.info(f"Removed partial output file: {output_file}")
+            except Exception as e:
+                logger.error(f"Error removing output file: {e}")
+
+        # Delete the original input file if requested
+        if delete_input and input_file and os.path.exists(input_file):
+            try:
+                os.remove(input_file)
+                logger.info(f"Removed original input file: {input_file}")
+            except Exception as e:
+                logger.error(f"Error removing input file: {e}")
+
+        # Update status and clean up
+        self.active_transcodes[task_id]['status'] = 'cancelled'
+        self.cleanup_task(task_id)
+        return True
