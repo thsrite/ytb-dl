@@ -1,6 +1,12 @@
 # Stage 1: build FFmpeg with Intel Quick Sync/VA-API support
 FROM ubuntu:24.04 AS ffmpeg-builder
 
+ARG TARGETARCH
+RUN if [ "${TARGETARCH:-amd64}" != "amd64" ]; then \
+        echo "Intel Quick Sync build is only supported on amd64; requested ${TARGETARCH}" >&2; \
+        exit 1; \
+    fi
+
 ENV DEBIAN_FRONTEND=noninteractive \
     FFMPEG_VERSION=6.1
 
@@ -56,6 +62,12 @@ RUN rm -rf /usr/src/ffmpeg
 
 # Stage 2: application runtime with compiled FFmpeg
 FROM ubuntu:24.04
+
+ARG TARGETARCH
+RUN if [ "${TARGETARCH:-amd64}" != "amd64" ]; then \
+        echo "Intel Quick Sync runtime is only supported on amd64; requested ${TARGETARCH}" >&2; \
+        exit 1; \
+    fi
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONPATH=/app \
