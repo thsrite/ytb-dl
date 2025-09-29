@@ -98,8 +98,6 @@ RUN apt-get update && \
         libdav1d7 \
         libmfx1 \
         libva2 \
-        libsvtav1dec2 \
-        libsvtav1enc2 \
         libx264-164 \
         libx265-199 \
         python3 \
@@ -107,6 +105,9 @@ RUN apt-get update && \
         python3-venv \
         vainfo \
         wget && \
+    # Optional SVT-AV1 runtime libraries (package names differ across releases)
+    (apt-get install -y --no-install-recommends libsvtav1dec1 libsvtav1enc1 >/dev/null 2>&1 || \
+     apt-get install -y --no-install-recommends libsvtav1dec1t64 libsvtav1enc1t64 >/dev/null 2>&1 || true) && \
     python3 -m venv "$VIRTUAL_ENV" && \
     rm -rf /var/lib/apt/lists/*
 
