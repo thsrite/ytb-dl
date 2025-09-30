@@ -747,17 +747,29 @@ function updateProgress(status) {
         }
     }
 
+    // Update main status based on status field, not just phase
+    if (status.status === 'transcoding' && !status.phase) {
+        // If status is transcoding but phase is not set, set it
+        elements.progressStatus.textContent = '正在转码视频...';
+    }
+
     switch (status.status) {
         case 'downloading':
         case 'transcoding':
             // Update download statistics
             // Don't override speed field if we're transcoding and already showing time
-            if (!(status.phase === 'transcoding' && status.current_time !== undefined && status.total_time !== undefined)) {
+            if (!((status.status === 'transcoding' || status.phase === 'transcoding') && status.current_time !== undefined && status.total_time !== undefined)) {
                 if (status.speed) {
                     elements.downloadSpeed.textContent = status.speed;
                     if (elements.speedLabel) elements.speedLabel.textContent = '速度';
                 } else {
                     elements.downloadSpeed.textContent = '--';
+                }
+            } else if (status.status === 'transcoding' || status.phase === 'transcoding') {
+                // Ensure transcoding time is shown when status is transcoding
+                if (status.current_time !== undefined && status.total_time !== undefined) {
+                    elements.downloadSpeed.textContent = `${formatTimeSeconds(status.current_time)} / ${formatTimeSeconds(status.total_time)}`;
+                    elements.speedLabel.textContent = '已转时间';
                 }
             }
 
@@ -855,11 +867,20 @@ function updateHistoryProgress(taskId, status) {
     if (status.status === 'downloading' || status.status === 'processing' || status.status === 'transcoding') {
         historyProgress.style.display = 'block';
 
-        // Update main status text for transcoding
+        // Update main status text based on current status
         const statusElement = historyItem.querySelector('.history-status');
-        if (statusElement && status.status === 'transcoding') {
-            statusElement.textContent = '正在转码';
-            statusElement.className = 'history-status status-transcoding';
+        if (statusElement) {
+            // Update status text and class based on actual status or phase
+            if (status.status === 'transcoding' || status.phase === 'transcoding') {
+                statusElement.textContent = '正在转码';
+                statusElement.className = 'history-status status-transcoding';
+            } else if (status.status === 'processing' || status.phase === 'merging') {
+                statusElement.textContent = '处理中';
+                statusElement.className = 'history-status status-processing';
+            } else if (status.status === 'downloading') {
+                statusElement.textContent = '下载中';
+                statusElement.className = 'history-status status-downloading';
+            }
         }
     }
 
