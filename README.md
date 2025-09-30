@@ -167,7 +167,7 @@ source venv/bin/activate  # Linux/Mac
 pip install -r requirements.txt
 
 # 4. 安装 ffmpeg
-# Ubuntu/Debian
+# Ubuntu/Debian (Docker镜像基于Ubuntu 24.04)
 sudo apt update && sudo apt install ffmpeg
 
 # macOS
@@ -185,13 +185,19 @@ uvicorn main:app --host 0.0.0.0 --port 9832
 open http://localhost:9832
 ```
 
-### 🐳 Docker 镜像标签
+### 🐳 Docker 镜像信息
 
 | 标签 | 描述 | 适用场景 |
 |------|------|----------|
-| `latest` | 最新稳定版 | 生产环境推荐 |
-| `v1.0.0` | 指定版本 | 版本锁定部署 |
+| `latest` | 最新稳定版（基于Ubuntu 24.04） | 生产环境推荐 |
+| `v1.0.x` | 指定版本 | 版本锁定部署 |
 | `main` | 主分支最新 | 测试新功能 |
+
+**镜像特性：**
+- 基础镜像：Ubuntu 24.04 LTS
+- 内置FFmpeg 6.1（支持硬件加速）
+- Python 3.12 运行环境
+- Intel Quick Sync / VA-API 支持
 
 ### 🔧 环境变量配置
 
@@ -352,6 +358,13 @@ Content-Type: application/json
     "public_base_url": "https://your-domain.com",
     "default_format_id": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
     "proxy_domain": "your-proxy-domain.com"
+  },
+  "ffmpeg": {
+    "enabled": false,
+    "av1_only": true,
+    "hardware_preset": "custom",
+    "command": "-c:v libx264 -preset medium -crf 23 -c:a aac -b:a 192k",
+    "output_format": "mp4"
   }
 }
 ```
@@ -369,6 +382,11 @@ Content-Type: application/json
 | `cookiecloud.enabled` | bool | 启用CookieCloud同步 | `true` |
 | `cookiecloud.server_url` | string | CookieCloud服务地址 | `"https://cookiecloud.com"` |
 | `cookiecloud.auto_sync` | bool | 自动同步（每30分钟） | `true` |
+| `ffmpeg.enabled` | bool | 启用FFmpeg转码 | `false` |
+| `ffmpeg.av1_only` | bool | 仅转码AV1视频 | `true` |
+| `ffmpeg.hardware_preset` | string | 硬件加速预设 | `"custom"` |
+| `ffmpeg.command` | string | FFmpeg命令参数 | 见下方说明 |
+| `ffmpeg.output_format` | string | 输出格式 | `"mp4"` |
 
 ### 🏢 企业微信配置
 
@@ -415,6 +433,33 @@ Content-Type: application/json
 # Netscape HTTP Cookie File
 .youtube.com    TRUE    /    FALSE    1792896464    SID    your_session_id
 .youtube.com    TRUE    /    TRUE     1792896464    __Secure-1PSID    your_secure_session
+```
+
+### 🎬 FFmpeg 转码配置
+
+#### 硬件加速预设
+
+| 预设名称 | FFmpeg 命令 | 适用场景 |
+|----------|-------------|----------|
+| `intel_qsv` | `-c:v h264_qsv -preset medium -global_quality 23` | Intel 核显加速 |
+| `nvidia` | `-c:v h264_nvenc -preset medium -cq 23` | NVIDIA 显卡加速 |
+| `amd` | `-c:v h264_amf -quality balanced -rc cqp -qp 23` | AMD 显卡加速 |
+| `videotoolbox` | `-c:v h264_videotoolbox -b:v 5000k` | macOS 硬件加速 |
+| `vaapi` | `-vaapi_device /dev/dri/renderD128 -c:v h264_vaapi` | Linux VA-API |
+| `custom` | 自定义命令 | 高级用户自定义 |
+
+#### 自定义转码示例
+
+```json
+{
+  "ffmpeg": {
+    "enabled": true,
+    "av1_only": true,  // 仅转码AV1视频，false则转码所有
+    "hardware_preset": "custom",
+    "command": "-c:v libx265 -preset slow -crf 20 -c:a aac -b:a 256k",
+    "output_format": "mp4"
+  }
+}
 ```
 
 ### 🔧 高级参数定制
@@ -768,6 +813,26 @@ copies of the Software...
 ![Docker Pulls](https://img.shields.io/docker/pulls/thsrite/ytb-dl)
 
 ## 📈 更新日志
+
+### v1.0.6 (2025-09-30) 🎬
+- ✨ **FFmpeg 视频转码功能**
+  - 支持 AV1 视频自动检测和转码
+  - 实时转码进度跟踪，显示已转时间和剩余时间
+  - 支持多种硬件加速预设（Intel QSV、NVIDIA、AMD、VideoToolbox）
+  - 自定义 FFmpeg 命令参数配置
+  - 转码后自动删除原始文件，保留转码文件
+
+- 🔄 **自动化与优化**
+  - 认证失败时自动刷新 Cookie（CookieCloud/浏览器）
+  - Docker 环境支持 yt-dlp 在线更新（使用 --user 参数）
+  - 转码任务取消时正确终止 FFmpeg 进程
+
+- 🐛 **Bug 修复**
+  - 修复 FFmpeg 配置无法持久化的问题
+  - 修复历史记录转码状态显示问题
+  - 修复 404 接口重复调用问题
+  - 修复重新下载功能的 task_id 处理
+  - 修复转码时删除任务的文件清理逻辑
 
 ### v1.0.5 (2025-09-29) 🚀
 - 🔃 获取视频信息时检测到 Cookie 失效后，会自动同步 CookieCloud/浏览器最新 Cookie 并落盘
